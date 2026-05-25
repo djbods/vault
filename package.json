@@ -1,0 +1,18 @@
+{
+  "name": "vault",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Personal video streaming app — a cinematic, self-hosted vault for your videos.",
+  "main": "server.js",
+  "scripts": {
+    "start": "/Users/jbodsworth/.nvm/versions/node/v20.16.0/bin/node server.js",
+    "dev": "/Users/jbodsworth/.nvm/versions/node/v20.16.0/bin/node --watch server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "multer": "^2.1.1",
+    "webtorrent": "^3.0.0"
+  }
+}
