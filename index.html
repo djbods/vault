@@ -797,6 +797,218 @@
         transition: color 0.3s ease;
       }
 
+      .sub-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .sub-list:empty {
+        display: none;
+      }
+
+      .sub-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 14px;
+        background: var(--surface);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: 3px;
+      }
+
+      .sub-row-name {
+        flex: 1 1 auto;
+        font-family: 'DM Sans', sans-serif;
+        font-size: 12px;
+        color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+      }
+
+      .sub-row-lang {
+        flex: 0 0 auto;
+        font-family: 'DM Sans', sans-serif;
+        font-size: 11px;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        padding: 6px 10px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: 2px;
+        color: var(--text);
+        cursor: pointer;
+        outline: none;
+      }
+
+      .sub-row-lang:focus {
+        border-color: var(--gold);
+      }
+
+      .sub-row-remove {
+        background: transparent;
+        border: none;
+        color: var(--text-faint);
+        cursor: pointer;
+        font-size: 18px;
+        padding: 0 4px;
+        transition: color 0.3s ease;
+      }
+
+      .sub-row-remove:hover {
+        color: var(--danger);
+      }
+
+      /* Poster picker (TMDB) */
+      .tmdb-search {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 18px;
+      }
+
+      .tmdb-input {
+        flex: 1;
+        font-family: 'DM Sans', sans-serif;
+        font-size: 13px;
+        padding: 12px 14px;
+        background: var(--surface);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 2px;
+        color: var(--text);
+        outline: none;
+      }
+
+      .tmdb-input:focus {
+        border-color: var(--border-strong);
+      }
+
+      .tmdb-results {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+        gap: 14px;
+        max-height: 50vh;
+        overflow-y: auto;
+        padding-right: 4px;
+      }
+
+      .tmdb-card {
+        background: var(--surface);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: 3px;
+        overflow: hidden;
+        cursor: pointer;
+        transition: all 0.3s ease;
+      }
+
+      .tmdb-card:hover {
+        border-color: var(--gold);
+        transform: translateY(-2px);
+      }
+
+      .tmdb-card.selected {
+        border-color: var(--gold);
+        box-shadow: 0 0 24px rgba(212, 160, 74, 0.25);
+      }
+
+      .tmdb-poster {
+        width: 100%;
+        aspect-ratio: 2 / 3;
+        object-fit: cover;
+        display: block;
+        background: #1a1820;
+      }
+
+      .tmdb-meta {
+        padding: 10px 12px;
+        font-family: 'DM Sans', sans-serif;
+        font-size: 11px;
+        color: var(--text-dim);
+      }
+
+      .tmdb-meta .t-name {
+        color: var(--text);
+        font-weight: 500;
+        margin-bottom: 3px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .tmdb-empty {
+        padding: 40px 20px;
+        text-align: center;
+        font-family: 'DM Sans', sans-serif;
+        font-size: 12px;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: var(--text-faint);
+      }
+
+      .card-edit {
+        position: absolute;
+        top: 12px;
+        right: 52px;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: rgba(8, 7, 10, 0.75);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        opacity: 0;
+        transition: all 0.3s ease;
+        z-index: 4;
+        backdrop-filter: blur(8px);
+      }
+
+      .card:hover .card-edit {
+        opacity: 1;
+      }
+
+      .card-edit:hover {
+        background: rgba(212, 160, 74, 0.15);
+        border-color: var(--gold);
+      }
+
+      .card-edit svg {
+        width: 14px;
+        height: 14px;
+        stroke: var(--text-dim);
+        fill: none;
+        transition: stroke 0.3s ease;
+      }
+
+      .card-edit:hover svg {
+        stroke: var(--gold);
+      }
+
+      .card-media img.poster-img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+
+      .card-media .preview-video {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        opacity: 0;
+        transition: opacity 0.4s ease;
+        z-index: 1;
+      }
+
+      .card-media .preview-video.playing {
+        opacity: 1;
+      }
+
       .sub-clear:hover {
         color: var(--danger);
       }
@@ -885,49 +1097,67 @@
       /* Player modal */
       .player-modal {
         background: rgba(0, 0, 0, 0.96);
+        padding: 24px;
+        align-items: stretch;
+        justify-content: center;
       }
 
       .player-wrap {
-        width: 90vw;
-        max-width: 1600px;
-        height: 90vh;
+        width: min(90vw, 1600px);
+        max-width: 100%;
+        margin: 0 auto;
         display: flex;
-        align-items: center;
-        justify-content: center;
+        flex-direction: column;
+        gap: 14px;
         position: relative;
+        min-height: 0;
+        flex: 1 1 auto;
       }
 
-      .player-wrap video {
-        width: 100%;
-        height: 100%;
-        max-height: 90vh;
-        object-fit: contain;
-        background: #000;
-        border-radius: 2px;
-        box-shadow: 0 40px 120px rgba(0, 0, 0, 0.8);
+      .player-chrome {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
       }
 
       .player-title {
-        position: absolute;
-        top: -52px;
-        left: 0;
         font-family: 'Playfair Display', serif;
         font-size: 20px;
         font-weight: 400;
         color: var(--text);
         letter-spacing: 0.05em;
-        max-width: 60%;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        min-width: 0;
+        flex: 1 1 auto;
       }
 
       .player-controls {
-        position: absolute;
-        top: -52px;
-        right: 0;
         display: flex;
         gap: 10px;
+        flex: 0 0 auto;
+        position: relative;
+      }
+
+      .player-stage {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .player-wrap video {
+        width: 100%;
+        height: 100%;
+        max-height: 100%;
+        object-fit: contain;
+        background: #000;
+        border-radius: 2px;
+        box-shadow: 0 40px 120px rgba(0, 0, 0, 0.8);
       }
 
       .player-btn {
@@ -941,6 +1171,7 @@
         padding: 10px 18px;
         cursor: pointer;
         transition: all 0.3s ease;
+        white-space: nowrap;
       }
 
       .player-btn:hover {
@@ -956,6 +1187,51 @@
         color: var(--gold);
         border-color: var(--gold);
         background: rgba(212, 160, 74, 0.08);
+      }
+
+      .sub-menu {
+        position: absolute;
+        top: calc(100% + 8px);
+        right: 0;
+        min-width: 180px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-strong);
+        border-radius: 3px;
+        padding: 6px;
+        display: none;
+        flex-direction: column;
+        gap: 2px;
+        z-index: 5;
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+      }
+
+      .sub-menu.open {
+        display: flex;
+      }
+
+      .sub-menu-item {
+        background: transparent;
+        border: none;
+        color: var(--text-dim);
+        font-family: 'DM Sans', sans-serif;
+        font-size: 11px;
+        letter-spacing: 0.25em;
+        text-transform: uppercase;
+        padding: 10px 14px;
+        text-align: left;
+        cursor: pointer;
+        border-radius: 2px;
+        transition: all 0.2s ease;
+      }
+
+      .sub-menu-item:hover {
+        background: rgba(212, 160, 74, 0.08);
+        color: var(--gold-soft);
+      }
+
+      .sub-menu-item.active {
+        color: var(--gold);
+        background: rgba(212, 160, 74, 0.1);
       }
 
       @media (max-width: 720px) {
@@ -1053,20 +1329,39 @@
           <div class="dropzone-sub" id="dropzoneSub">MP4 · MOV · WEBM · MKV</div>
         </label>
 
+        <div class="stage-row" id="posterStage" style="display: none">
+          <input
+            type="file"
+            id="posterInput"
+            accept="image/jpeg,image/png,image/webp"
+            style="display: none"
+          />
+          <div class="stage-row-info">
+            <div class="stage-row-label">Poster · Optional</div>
+            <div class="stage-row-name" id="posterName">None selected</div>
+          </div>
+          <img id="posterPreview" alt="" style="display:none; width:42px; height:60px; object-fit:cover; border-radius:2px; border:1px solid var(--border);"/>
+          <button class="sub-clear" id="posterClear" type="button" style="display: none" title="Remove poster">×</button>
+          <button class="sub-pick" id="posterTmdb" type="button">Search TMDB</button>
+          <button class="sub-pick" id="posterPick" type="button">Upload</button>
+        </div>
+
         <div class="stage-row" id="subtitleStage" style="display: none">
           <input
             type="file"
             id="subtitleInput"
             accept=".srt,.vtt"
+            multiple
             style="display: none"
           />
           <div class="stage-row-info">
             <div class="stage-row-label">Subtitles · Optional</div>
-            <div class="stage-row-name" id="subtitleName">None selected</div>
+            <div class="stage-row-name" id="subtitleSummary">None added</div>
           </div>
-          <button class="sub-clear" id="subtitleClear" type="button" style="display: none" title="Remove subtitle">×</button>
-          <button class="sub-pick" id="subtitlePick" type="button">Choose · SRT / VTT</button>
+          <button class="sub-pick" id="subtitlePick" type="button">+ Add</button>
         </div>
+
+        <div class="sub-list" id="subtitleList"></div>
 
         <div class="upload-actions" id="uploadActions" style="display: none">
           <button class="btn-primary" id="commitUpload" type="button">Upload</button>
@@ -1084,15 +1379,40 @@
       </div>
     </div>
 
+    <!-- Poster picker modal (TMDB search) -->
+    <div class="modal" id="posterModal">
+      <div class="modal-content" style="width: 720px;">
+        <button class="modal-close" data-close="posterModal">×</button>
+        <h2 class="modal-title">Find a Poster</h2>
+        <p class="modal-sub" id="posterModalSub">Search The Movie Database</p>
+
+        <div class="tmdb-search">
+          <input type="text" class="tmdb-input" id="tmdbQuery" placeholder="Search title…" spellcheck="false" autocomplete="off"/>
+          <button class="upload-btn" id="tmdbSearchBtn">Search</button>
+        </div>
+
+        <div id="tmdbResults"></div>
+
+        <div class="upload-actions" id="posterActions" style="display:none;">
+          <button class="btn-primary" id="posterCommit" type="button">Use This Poster</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Player modal -->
     <div class="modal player-modal" id="playerModal">
       <div class="player-wrap">
-        <div class="player-title" id="playerTitle"></div>
-        <div class="player-controls">
-          <button class="player-btn" id="playerCC" type="button" hidden>CC</button>
-          <button class="player-btn" data-close="playerModal" type="button">Close · Esc</button>
+        <div class="player-chrome">
+          <div class="player-title" id="playerTitle"></div>
+          <div class="player-controls">
+            <button class="player-btn" id="playerCC" type="button" hidden aria-haspopup="menu" aria-expanded="false">CC</button>
+            <div class="sub-menu" id="subMenu" role="menu"></div>
+            <button class="player-btn" data-close="playerModal" type="button">Close · Esc</button>
+          </div>
         </div>
-        <video id="player" controls playsinline crossorigin="anonymous"></video>
+        <div class="player-stage">
+          <video id="player" controls playsinline crossorigin="anonymous"></video>
+        </div>
       </div>
     </div>
 
@@ -1109,15 +1429,30 @@
       const playerEl = document.getElementById('player');
       const playerTitleEl = document.getElementById('playerTitle');
       const playerCC = document.getElementById('playerCC');
+      const subMenu = document.getElementById('subMenu');
       const dropzone = document.getElementById('dropzone');
       const dropzoneText = document.getElementById('dropzoneText');
       const dropzoneSub = document.getElementById('dropzoneSub');
       const fileInput = document.getElementById('fileInput');
       const subtitleStage = document.getElementById('subtitleStage');
       const subtitleInput = document.getElementById('subtitleInput');
-      const subtitleName = document.getElementById('subtitleName');
-      const subtitleClear = document.getElementById('subtitleClear');
+      const subtitleSummary = document.getElementById('subtitleSummary');
       const subtitlePick = document.getElementById('subtitlePick');
+      const subtitleList = document.getElementById('subtitleList');
+      const posterStage = document.getElementById('posterStage');
+      const posterInput = document.getElementById('posterInput');
+      const posterName = document.getElementById('posterName');
+      const posterPreview = document.getElementById('posterPreview');
+      const posterClear = document.getElementById('posterClear');
+      const posterPick = document.getElementById('posterPick');
+      const posterTmdb = document.getElementById('posterTmdb');
+      const posterModal = document.getElementById('posterModal');
+      const posterModalSub = document.getElementById('posterModalSub');
+      const tmdbQuery = document.getElementById('tmdbQuery');
+      const tmdbSearchBtn = document.getElementById('tmdbSearchBtn');
+      const tmdbResults = document.getElementById('tmdbResults');
+      const posterActions = document.getElementById('posterActions');
+      const posterCommit = document.getElementById('posterCommit');
       const uploadActions = document.getElementById('uploadActions');
       const commitUploadBtn = document.getElementById('commitUpload');
       const progressEl = document.getElementById('progress');
@@ -1133,7 +1468,20 @@
       let currentTab = 'library';
       let torrentPollTimer = null;
       let stagedVideo = null;
-      let stagedSubtitle = null;
+      let stagedSubtitles = []; // [{ file, lang }]
+      let stagedPoster = null;  // { kind: 'file', file } | { kind: 'tmdb', posterPath, previewUrl }
+      let tmdbConfigured = null;
+      let posterEditorMode = null; // null (upload-stage) | { videoName }
+      let posterTmdbSelected = null; // { posterPath, previewUrl }
+      const SUB_LANG_OPTIONS = [
+        ['en', 'English'], ['es', 'Spanish'], ['fr', 'French'], ['de', 'German'],
+        ['it', 'Italian'], ['pt', 'Portuguese'], ['nl', 'Dutch'], ['sv', 'Swedish'],
+        ['no', 'Norwegian'], ['da', 'Danish'], ['fi', 'Finnish'], ['ru', 'Russian'],
+        ['pl', 'Polish'], ['ja', 'Japanese'], ['ko', 'Korean'], ['zh', 'Chinese'],
+        ['ar', 'Arabic'], ['hi', 'Hindi'], ['tr', 'Turkish'], ['vi', 'Vietnamese'],
+        ['th', 'Thai'], ['id', 'Indonesian'], ['he', 'Hebrew'], ['cs', 'Czech'],
+        ['el', 'Greek'], ['hu', 'Hungarian'], ['ro', 'Romanian'], ['uk', 'Ukrainian'],
+      ];
 
       // ---- Helpers
       const formatSize = (bytes) => {
@@ -1192,6 +1540,8 @@
           playerEl.load();
           playerCC.hidden = true;
           playerCC.classList.remove('active');
+          closeSubMenu();
+          subMenu.innerHTML = '';
         }
         if (el === uploadModal) resetUploadModal();
       };
@@ -1203,7 +1553,7 @@
         });
       });
 
-      [uploadModal, playerModal].forEach((modal) => {
+      [uploadModal, playerModal, posterModal].forEach((modal) => {
         modal.addEventListener('click', (e) => {
           if (e.target === modal) closeModal(modal);
         });
@@ -1212,6 +1562,7 @@
       document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
           if (playerModal.classList.contains('active')) closeModal(playerModal);
+          else if (posterModal.classList.contains('active')) closeModal(posterModal);
           else if (uploadModal.classList.contains('active')) closeModal(uploadModal);
         }
       });
@@ -1221,18 +1572,88 @@
       // ---- Upload staging
       const resetUploadModal = () => {
         stagedVideo = null;
-        stagedSubtitle = null;
+        stagedSubtitles = [];
+        stagedPoster = null;
         fileInput.value = '';
         subtitleInput.value = '';
+        posterInput.value = '';
         subtitleStage.style.display = 'none';
+        posterStage.style.display = 'none';
         uploadActions.style.display = 'none';
-        subtitleName.textContent = 'None selected';
-        subtitleClear.style.display = 'none';
+        subtitleSummary.textContent = 'None added';
+        subtitleList.innerHTML = '';
+        posterName.textContent = 'None selected';
+        posterPreview.style.display = 'none';
+        posterPreview.src = '';
+        posterClear.style.display = 'none';
         progressEl.classList.remove('active');
         progressFill.style.width = '0%';
         dropzoneText.innerHTML = 'Drop a video here, or <span class="dropzone-link">browse</span>';
         dropzoneSub.textContent = 'MP4 · MOV · WEBM · MKV';
         commitUploadBtn.disabled = false;
+        commitUploadBtn.textContent = 'Upload';
+      };
+
+      const updatePosterSlotUI = () => {
+        if (!stagedPoster) {
+          posterName.textContent = 'None selected';
+          posterPreview.style.display = 'none';
+          posterPreview.src = '';
+          posterClear.style.display = 'none';
+          return;
+        }
+        if (stagedPoster.kind === 'file') {
+          posterName.textContent = stagedPoster.file.name;
+          posterPreview.src = URL.createObjectURL(stagedPoster.file);
+          posterPreview.style.display = '';
+        } else if (stagedPoster.kind === 'tmdb') {
+          posterName.textContent = stagedPoster.title ? `TMDB · ${stagedPoster.title}` : 'TMDB poster';
+          posterPreview.src = stagedPoster.previewUrl;
+          posterPreview.style.display = '';
+        }
+        posterClear.style.display = '';
+      };
+
+      const renderSubtitleList = () => {
+        subtitleList.innerHTML = '';
+        if (!stagedSubtitles.length) {
+          subtitleSummary.textContent = 'None added';
+          return;
+        }
+        subtitleSummary.textContent =
+          `${stagedSubtitles.length} subtitle${stagedSubtitles.length === 1 ? '' : 's'} added`;
+        stagedSubtitles.forEach((entry, idx) => {
+          const row = document.createElement('div');
+          row.className = 'sub-row';
+          const select = SUB_LANG_OPTIONS.map(([code, label]) =>
+            `<option value="${code}" ${entry.lang === code ? 'selected' : ''}>${label} (${code.toUpperCase()})</option>`
+          ).join('');
+          row.innerHTML = `
+            <div class="sub-row-name">${escapeHtml(entry.file.name)}</div>
+            <select class="sub-row-lang" data-idx="${idx}">${select}</select>
+            <button class="sub-row-remove" type="button" data-idx="${idx}" title="Remove">×</button>
+          `;
+          subtitleList.appendChild(row);
+        });
+        subtitleList.querySelectorAll('.sub-row-lang').forEach((sel) => {
+          sel.addEventListener('change', (e) => {
+            const i = Number(e.target.dataset.idx);
+            stagedSubtitles[i].lang = e.target.value;
+          });
+        });
+        subtitleList.querySelectorAll('.sub-row-remove').forEach((btn) => {
+          btn.addEventListener('click', (e) => {
+            const i = Number(e.currentTarget.dataset.idx);
+            stagedSubtitles.splice(i, 1);
+            renderSubtitleList();
+          });
+        });
+      };
+
+      const inferLangFromFilename = (filename) => {
+        const m = filename.match(/\.([a-z]{2,3})\.[^.]+$/i);
+        if (m && SUB_LANG_OPTIONS.find(([c]) => c === m[1].toLowerCase())) return m[1].toLowerCase();
+        return 'en';
       };
 
       const stageVideo = (file) => {
@@ -1241,6 +1662,7 @@
         dropzoneText.textContent = file.name;
         dropzoneSub.textContent = formatSize(file.size);
         subtitleStage.style.display = 'flex';
+        posterStage.style.display = 'flex';
         uploadActions.style.display = 'flex';
       };
 
@@ -1264,17 +1686,29 @@
 
       subtitlePick.addEventListener('click', () => subtitleInput.click());
       subtitleInput.addEventListener('change', (e) => {
+        const files = Array.from(e.target.files || []);
+        files.forEach((file) => {
+          stagedSubtitles.push({ file, lang: inferLangFromFilename(file.name) });
+        });
+        subtitleInput.value = '';
+        renderSubtitleList();
+      });
+
+      posterPick.addEventListener('click', () => posterInput.click());
+      posterInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        stagedSubtitle = file;
-        subtitleName.textContent = file.name;
-        subtitleClear.style.display = '';
+        stagedPoster = { kind: 'file', file };
+        updatePosterSlotUI();
       });
-      subtitleClear.addEventListener('click', () => {
-        stagedSubtitle = null;
-        subtitleInput.value = '';
-        subtitleName.textContent = 'None selected';
-        subtitleClear.style.display = 'none';
+      posterClear.addEventListener('click', () => {
+        stagedPoster = null;
+        posterInput.value = '';
+        updatePosterSlotUI();
+      });
+      posterTmdb.addEventListener('click', () => {
+        posterEditorMode = null; // stage-only mode
+        openTmdbPicker(stagedVideo ? stagedVideo.name : '');
       });
 
       commitUploadBtn.addEventListener('click', async () => {
@@ -1282,8 +1716,13 @@
         commitUploadBtn.disabled = true;
         try {
           const uploaded = await uploadVideo(stagedVideo);
-          if (stagedSubtitle && uploaded && uploaded.name) {
-            await uploadSubtitle(stagedSubtitle, uploaded.name);
+          if (uploaded && uploaded.name) {
+            for (const entry of stagedSubtitles) {
+              await uploadSubtitle(entry.file, uploaded.name, entry.lang);
+            }
+            if (stagedPoster) {
+              await applyPoster(stagedPoster, uploaded.name);
+            }
           }
           closeModal(uploadModal);
           loadVideos();
@@ -1329,50 +1768,355 @@
         });
       };
 
-      const uploadSubtitle = (file, videoName) => {
+      const uploadSubtitle = (file, videoName, lang) => {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('videoName', videoName);
+        if (lang) formData.append('lang', lang);
         return fetch(`${API}/upload-subtitles`, { method: 'POST', body: formData }).then((r) => {
           if (!r.ok) throw new Error('Subtitle upload failed');
           return r.json();
         });
       };
 
-      // ---- Player + subtitles
-      const applySubtitles = (tracks) => {
-        playerEl.querySelectorAll('track').forEach((t) => t.remove());
-        if (!tracks || !tracks.length) {
-          playerCC.hidden = true;
+      const uploadPosterFile = (file, videoName) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('videoName', videoName);
+        return fetch(`${API}/upload-poster`, { method: 'POST', body: formData }).then(async (r) => {
+          if (!r.ok) {
+            const body = await r.json().catch(() => ({}));
+            throw new Error(body.error || 'Poster upload failed');
+          }
+          return r.json();
+        });
+      };
+
+      const fetchTmdbPoster = (posterPath, videoName) =>
+        fetch(`${API}/tmdb/fetch-poster`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ posterPath, videoName }),
+        }).then(async (r) => {
+          if (!r.ok) {
+            const body = await r.json().catch(() => ({}));
+            throw new Error(body.error || 'TMDB poster fetch failed');
+          }
+          return r.json();
+        });
+
+      const deletePoster = (videoName) =>
+        fetch(`${API}/poster/${encodeURIComponent(videoName)}`, { method: 'DELETE' });
+
+      const applyPoster = async (poster, videoName) => {
+        if (poster.kind === 'file') return uploadPosterFile(poster.file, videoName);
+        if (poster.kind === 'tmdb') return fetchTmdbPoster(poster.posterPath, videoName);
+      };
+
+      // ---- TMDB picker
+      const ensureTmdbStatus = async () => {
+        if (tmdbConfigured !== null) return tmdbConfigured;
+        try {
+          const r = await fetch(`${API}/tmdb/status`);
+          const data = await r.json();
+          tmdbConfigured = Boolean(data.configured);
+        } catch {
+          tmdbConfigured = false;
+        }
+        return tmdbConfigured;
+      };
+
+      const renderTmdbResults = (results) => {
+        tmdbResults.innerHTML = '';
+        posterTmdbSelected = null;
+        posterActions.style.display = 'none';
+        if (!results.length) {
+          tmdbResults.innerHTML = `<div class="tmdb-empty">No matches. Try a different title.</div>`;
           return;
         }
+        const grid = document.createElement('div');
+        grid.className = 'tmdb-results';
+        results.forEach((m) => {
+          const card = document.createElement('div');
+          card.className = 'tmdb-card';
+          card.innerHTML = `
+            ${m.posterUrl
+              ? `<img class="tmdb-poster" src="${m.posterUrl}" alt="" loading="lazy"/>`
+              : `<div class="tmdb-poster"></div>`}
+            <div class="tmdb-meta">
+              <div class="t-name">${escapeHtml(m.title || 'Untitled')}</div>
+              <div>${escapeHtml(m.year || '—')}</div>
+            </div>
+          `;
+          card.addEventListener('click', () => {
+            grid.querySelectorAll('.tmdb-card').forEach((c) => c.classList.remove('selected'));
+            card.classList.add('selected');
+            posterTmdbSelected = {
+              posterPath: m.posterPath,
+              previewUrl: m.posterUrl,
+              title: m.title,
+            };
+            posterActions.style.display = posterTmdbSelected.posterPath ? 'flex' : 'none';
+          });
+          grid.appendChild(card);
+        });
+        tmdbResults.appendChild(grid);
+      };
+
+      const runTmdbSearch = async () => {
+        const q = tmdbQuery.value.trim();
+        if (!q) return;
+        tmdbResults.innerHTML = `<div class="tmdb-empty">Searching…</div>`;
+        posterActions.style.display = 'none';
+        try {
+          const r = await fetch(`${API}/tmdb/search?q=${encodeURIComponent(q)}`);
+          if (!r.ok) {
+            const body = await r.json().catch(() => ({}));
+            throw new Error(body.error || `HTTP ${r.status}`);
+          }
+          const data = await r.json();
+          renderTmdbResults(data.results || []);
+        } catch (err) {
+          tmdbResults.innerHTML = `<div class="tmdb-empty">${escapeHtml(err.message)}</div>`;
+        }
+      };
+
+      const openTmdbPicker = async (filename) => {
+        const ok = await ensureTmdbStatus();
+        if (!ok) {
+          alert('TMDB is not configured. Add TMDB_API_KEY to .env and restart the server.');
+          return;
+        }
+        posterModalSub.textContent = posterEditorMode
+          ? `Update poster for ${cleanName(posterEditorMode.videoName)}`
+          : 'Search The Movie Database';
+        tmdbResults.innerHTML = '';
+        posterActions.style.display = 'none';
+        posterTmdbSelected = null;
+        // Prefill cleaned query from filename
+        try {
+          if (filename) {
+            const r = await fetch(`${API}/tmdb/suggest-query?filename=${encodeURIComponent(filename)}`);
+            const data = await r.json();
+            tmdbQuery.value = data.query || cleanName(filename);
+          } else {
+            tmdbQuery.value = '';
+          }
+        } catch {
+          tmdbQuery.value = filename ? cleanName(filename) : '';
+        }
+        openModal(posterModal);
+        if (tmdbQuery.value) runTmdbSearch();
+        setTimeout(() => tmdbQuery.focus(), 50);
+      };
+
+      tmdbSearchBtn.addEventListener('click', runTmdbSearch);
+      tmdbQuery.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') runTmdbSearch();
+      });
+
+      posterCommit.addEventListener('click', async () => {
+        if (!posterTmdbSelected) return;
+        if (posterEditorMode) {
+          posterCommit.disabled = true;
+          try {
+            await fetchTmdbPoster(posterTmdbSelected.posterPath, posterEditorMode.videoName);
+            closeModal(posterModal);
+            loadVideos();
+          } catch (err) {
+            alert(err.message);
+          } finally {
+            posterCommit.disabled = false;
+          }
+        } else {
+          stagedPoster = {
+            kind: 'tmdb',
+            posterPath: posterTmdbSelected.posterPath,
+            previewUrl: posterTmdbSelected.previewUrl,
+            title: posterTmdbSelected.title,
+          };
+          updatePosterSlotUI();
+          closeModal(posterModal);
+        }
+      });
+
+      // ---- Poster editor (existing card)
+      const openPosterEditor = async (videoName) => {
+        const choice = await pickPosterAction();
+        if (!choice) return;
+        if (choice === 'upload') {
+          uploadPosterFromDisk(videoName);
+        } else if (choice === 'tmdb') {
+          posterEditorMode = { videoName };
+          openTmdbPicker(videoName);
+        } else if (choice === 'remove') {
+          if (!confirm('Remove the current poster?')) return;
+          await deletePoster(videoName);
+          loadVideos();
+        }
+      };
+
+      // Minimal native-prompt picker — keeps the surface area small. Returns 'upload' | 'tmdb' | 'remove' | null.
+      const pickPosterAction = async () => {
+        const tmdbOk = await ensureTmdbStatus();
+        const options = tmdbOk
+          ? '1) Upload from file\n2) Search TMDB\n3) Remove current poster'
+          : '1) Upload from file\n3) Remove current poster\n\n(TMDB lookup disabled — add TMDB_API_KEY to .env)';
+        const choice = prompt(`Poster options:\n\n${options}\n\nEnter 1, 2, or 3:`);
+        if (!choice) return null;
+        if (choice.trim() === '1') return 'upload';
+        if (choice.trim() === '2' && tmdbOk) return 'tmdb';
+        if (choice.trim() === '3') return 'remove';
+        return null;
+      };
+
+      const uploadPosterFromDisk = (videoName) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/jpeg,image/png,image/webp';
+        input.addEventListener('change', async () => {
+          const file = input.files && input.files[0];
+          if (!file) return;
+          try {
+            await uploadPosterFile(file, videoName);
+            loadVideos();
+          } catch (err) {
+            alert(err.message);
+          }
+        });
+        input.click();
+      };
+
+      // ---- Hover preview (Netflix-style)
+      const HOVER_DELAY_MS = 600;
+      const attachHoverPreview = (card, video, streamUrl) => {
+        let timer = null;
+        let previewVid = null;
+        const start = () => {
+          if (previewVid) return;
+          previewVid = document.createElement('video');
+          previewVid.className = 'preview-video';
+          previewVid.src = streamUrl;
+          previewVid.muted = true;
+          previewVid.playsInline = true;
+          previewVid.preload = 'auto';
+          previewVid.addEventListener('loadedmetadata', () => {
+            if (!previewVid) return;
+            const seekTo = Math.min(60, (previewVid.duration || 0) * 0.1);
+            try { previewVid.currentTime = seekTo; } catch {}
+          });
+          previewVid.addEventListener('canplay', () => {
+            if (!previewVid) return;
+            previewVid.play().then(() => {
+              if (previewVid) previewVid.classList.add('playing');
+            }).catch(() => {});
+          });
+          card.querySelector('.card-media').appendChild(previewVid);
+        };
+        const stop = () => {
+          if (timer) { clearTimeout(timer); timer = null; }
+          if (previewVid) {
+            try { previewVid.pause(); } catch {}
+            previewVid.remove();
+            previewVid = null;
+          }
+        };
+        card.addEventListener('mouseenter', () => {
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(start, HOVER_DELAY_MS);
+        });
+        card.addEventListener('mouseleave', stop);
+      };
+
+      // ---- Player + subtitles
+      const LANG_LABELS = {
+        en: 'English', es: 'Spanish', fr: 'French', de: 'German', it: 'Italian',
+        pt: 'Portuguese', nl: 'Dutch', sv: 'Swedish', no: 'Norwegian', da: 'Danish',
+        fi: 'Finnish', ru: 'Russian', pl: 'Polish', ja: 'Japanese', ko: 'Korean',
+        zh: 'Chinese', ar: 'Arabic', hi: 'Hindi', tr: 'Turkish', vi: 'Vietnamese',
+        th: 'Thai', id: 'Indonesian', he: 'Hebrew', cs: 'Czech', el: 'Greek',
+        hu: 'Hungarian', ro: 'Romanian', uk: 'Ukrainian',
+      };
+      const labelForLang = (code) =>
+        LANG_LABELS[(code || '').toLowerCase()] || (code || 'CC').toUpperCase();
+
+      let activeTrackIndex = -1; // -1 means "Off"
+
+      const closeSubMenu = () => {
+        subMenu.classList.remove('open');
+        playerCC.setAttribute('aria-expanded', 'false');
+      };
+
+      const renderSubMenu = (tracks) => {
+        subMenu.innerHTML = '';
+        const makeItem = (label, idx) => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'sub-menu-item';
+          btn.role = 'menuitem';
+          btn.textContent = label;
+          if (idx === activeTrackIndex) btn.classList.add('active');
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            selectSubtitle(idx);
+            closeSubMenu();
+          });
+          return btn;
+        };
+        subMenu.appendChild(makeItem('Off', -1));
         tracks.forEach((t, i) => {
+          subMenu.appendChild(makeItem(labelForLang(t.lang) || t.label || `Track ${i + 1}`, i));
+        });
+      };
+
+      const selectSubtitle = (idx) => {
+        activeTrackIndex = idx;
+        const tracks = playerEl.textTracks;
+        for (let i = 0; i < tracks.length; i++) {
+          tracks[i].mode = i === idx ? 'showing' : 'disabled';
+        }
+        playerCC.classList.toggle('active', idx >= 0);
+      };
+
+      const applySubtitles = (tracks) => {
+        playerEl.querySelectorAll('track').forEach((t) => t.remove());
+        activeTrackIndex = -1;
+        playerCC.classList.remove('active');
+        closeSubMenu();
+        if (!tracks || !tracks.length) {
+          playerCC.hidden = true;
+          subMenu.innerHTML = '';
+          return;
+        }
+        tracks.forEach((t) => {
           const el = document.createElement('track');
           el.kind = 'subtitles';
           el.src = t.url;
-          el.label = t.label || 'CC';
+          el.label = labelForLang(t.lang) || t.label || 'CC';
           el.srclang = t.lang || 'en';
-          if (i === 0) el.default = false; // user must enable
           playerEl.appendChild(el);
         });
         playerCC.hidden = false;
-        playerCC.classList.remove('active');
-        // Default OFF: force all tracks disabled after they load
+        renderSubMenu(tracks);
+        // Default OFF — force all tracks disabled after the browser loads them.
         const disableAll = () => {
           for (const tr of playerEl.textTracks) tr.mode = 'disabled';
         };
         disableAll();
-        // textTracks live update — re-disable shortly in case browser auto-enables
         setTimeout(disableAll, 50);
       };
 
-      playerCC.addEventListener('click', () => {
-        const tracks = playerEl.textTracks;
-        if (!tracks.length) return;
-        const wasActive = playerCC.classList.toggle('active');
-        for (let i = 0; i < tracks.length; i++) {
-          tracks[i].mode = wasActive && i === 0 ? 'showing' : 'disabled';
-        }
+      playerCC.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!playerEl.textTracks.length) return;
+        const isOpen = subMenu.classList.toggle('open');
+        playerCC.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+      });
+
+      document.addEventListener('click', (e) => {
+        if (!subMenu.classList.contains('open')) return;
+        if (e.target.closest('#subMenu') || e.target.closest('#playerCC')) return;
+        closeSubMenu();
       });
 
       const playLocalVideo = async (filename) => {
@@ -1420,13 +2164,24 @@
       const renderCard = (video) => {
         const card = document.createElement('div');
         card.className = 'card';
+        const streamUrl = `${API}/stream/${encodeURIComponent(video.name)}`;
+        const posterHtml = video.poster
+          ? `<img class="poster-img" src="${API}${video.poster}" alt="" loading="lazy"/>`
+          : `<video src="${streamUrl}#t=0.5" preload="metadata" muted playsinline></video>`;
         card.innerHTML = `
           <div class="card-media">
-            <video src="${API}/stream/${encodeURIComponent(video.name)}#t=0.5" preload="metadata" muted playsinline></video>
+            ${posterHtml}
             <div class="card-play">
               <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
             </div>
           </div>
+          <button class="card-edit" title="Edit poster">
+            <svg viewBox="0 0 24 24" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4" width="18" height="14" rx="2"/>
+              <circle cx="9" cy="10" r="1.6"/>
+              <path d="m21 15-5-5L5 21"/>
+            </svg>
+          </button>
           <button class="card-delete" title="Delete">
             <svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
               <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z"/>
@@ -1439,13 +2194,18 @@
           </div>
         `;
         card.addEventListener('click', (e) => {
-          if (e.target.closest('.card-delete')) return;
+          if (e.target.closest('.card-delete') || e.target.closest('.card-edit')) return;
           playLocalVideo(video.name);
         });
         card.querySelector('.card-delete').addEventListener('click', (e) => {
           e.stopPropagation();
           deleteVideo(video.name);
         });
+        card.querySelector('.card-edit').addEventListener('click', (e) => {
+          e.stopPropagation();
+          openPosterEditor(video.name);
+        });
+        attachHoverPreview(card, video, streamUrl);
         return card;
       };
 

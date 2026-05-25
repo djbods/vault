@@ -32,8 +32,52 @@ const MIME_TYPES = {
 
 const VIDEO_EXTS = new Set(Object.keys(MIME_TYPES));
 const SUBTITLE_EXTS = new Set(['.srt', '.vtt', '.ass', '.ssa']);
+const POSTER_EXTS = ['.jpg', '.jpeg', '.png', '.webp'];
+const POSTER_MIME = {
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+};
 
 const mimeFor = (filename) => MIME_TYPES[path.extname(filename).toLowerCase()] || 'application/octet-stream';
+
+const TMDB_API_KEY = process.env.TMDB_API_KEY || '';
+
+// Two-letter ISO language code, defaulting to "en"
+const sanitizeLang = (lang) => {
+  const m = String(lang || '').toLowerCase().match(/^[a-z]{2,3}$/);
+  return m ? m[0] : 'en';
+};
+
+// Strip release-group / quality / codec cruft so TMDB has a clean title to search.
+// "Project Hail Mary 2026 1080p WEB-DL HEVC ..." -> "Project Hail Mary 2026"
+const cleanQueryForTmdb = (filename) => {
+  let s = filename.replace(/\.[^.]+$/, '').replace(/[._]+/g, ' ');
+  const year = s.match(/^(.*?)\s+(?:\(|\[)?(\d{4})(?:\)|\])?(?:\s|$)/);
+  if (year) return `${year[1].trim()} ${year[2]}`.trim();
+  // Otherwise cut at first known quality / codec / source token.
+  s = s.split(/\s+(?:1080p|720p|2160p|480p|4k|uhd|hdr|webrip|web-dl|web|bluray|brrip|bdrip|hdtv|hevc|x264|x265|h264|h265|aac|ac3|dts|atmos|repack|proper|extended|remux)\b/i)[0];
+  return s.trim();
+};
+
+const findPoster = (videoFilename) => {
+  const base = baseNameNoExt(videoFilename);
+  for (const ext of POSTER_EXTS) {
+    const name = `${base}.poster${ext}`;
+    if (fs.existsSync(path.join(VIDEOS_DIR, name))) return name;
+  }
+  return null;
+};
+
+const removeExistingPosters = (videoBaseName) => {
+  POSTER_EXTS.forEach((ext) => {
+    const p = path.join(VIDEOS_DIR, `${videoBaseName}.poster${ext}`);
+    if (fs.existsSync(p)) {
+      try { fs.unlinkSync(p); } catch {}
+    }
+  });
+};
 
 const sanitize = (name) =>
   name
@@ -49,6 +93,9 @@ const resolveSafe = (filename) => {
 };
 
 const baseNameNoExt = (filename) => filename.replace(/\.[^.]+$/, '');
+
+// Treat "Movie.poster.jpg" as a sidecar, not a separate video listing.
+const isPosterFile = (name) => /\.poster\.(jpg|jpeg|png|webp)$/i.test(name);
 
 // Minimal SRT → VTT: prepend WEBVTT header, swap timestamp comma for dot.
 const srtToVtt = (srt) =>
@@ -148,16 +195,21 @@ app.get('/videos', (req, res) => {
     const files = entries
       .filter((e) => {
         if (!e.isFile() || e.name.startsWith('.')) return false;
-        return !SUBTITLE_EXTS.has(path.extname(e.name).toLowerCase());
+        const ext = path.extname(e.name).toLowerCase();
+        if (SUBTITLE_EXTS.has(ext)) return false;
+        if (isPosterFile(e.name)) return false;
+        return VIDEO_EXTS.has(ext);
       })
       .map((e) => {
         const filepath = path.join(VIDEOS_DIR, e.name);
         const stat = fs.statSync(filepath);
+        const poster = findPoster(e.name);
         return {
           name: e.name,
           size: stat.size,
           modified: stat.mtime.toISOString(),
           duration: null,
+          poster: poster ? `/poster/${encodeURIComponent(poster)}` : null,
         };
       })
       .sort((a, b) => b.modified.localeCompare(a.modified));
@@ -216,14 +268,15 @@ app.delete('/videos/:filename', (req, res) => {
     fs.readdir(VIDEOS_DIR, (readErr, entries) => {
       if (!readErr && entries) {
         entries
-          .filter(
-            (n) =>
-              SUBTITLE_EXTS.has(path.extname(n).toLowerCase()) &&
-              n.startsWith(base + '.')
-          )
+          .filter((n) => {
+            if (!n.startsWith(base + '.')) return false;
+            return (
+              SUBTITLE_EXTS.has(path.extname(n).toLowerCase()) || isPosterFile(n)
+            );
+          })
           .forEach((n) => {
-            const sub = resolveSafe(n);
-            if (sub) fs.unlink(sub, () => {});
+            const sidecar = resolveSafe(n);
+            if (sidecar) fs.unlink(sidecar, () => {});
           });
       }
       res.json({ deleted: req.params.filename });
@@ -248,8 +301,9 @@ app.post('/upload-subtitles', memUpload.single('file'), (req, res) => {
     return res.status(400).json({ error: 'Only .srt or .vtt accepted' });
   }
 
+  const lang = sanitizeLang(req.body && req.body.lang);
   const base = baseNameNoExt(path.basename(videoPath));
-  const targetName = `${base}.en.vtt`;
+  const targetName = `${base}.${lang}.vtt`;
   const targetPath = resolveSafe(targetName);
   if (!targetPath) return res.status(400).json({ error: 'Invalid path' });
 
@@ -259,7 +313,7 @@ app.post('/upload-subtitles', memUpload.single('file'), (req, res) => {
 
   fs.writeFile(targetPath, content, (err) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json({ name: targetName, videoName: path.basename(videoPath) });
+    res.json({ name: targetName, lang, videoName: path.basename(videoPath) });
   });
 });
 
@@ -303,6 +357,146 @@ app.get('/stream-subtitle/:filename', (req, res) => {
     return res.send(srtToVtt(fs.readFileSync(filepath, 'utf-8')));
   }
   fs.createReadStream(filepath).pipe(res);
+});
+
+// ---------- Posters ----------
+
+app.get('/poster/:filename', (req, res) => {
+  const filepath = resolveSafe(req.params.filename);
+  if (!filepath || !fs.existsSync(filepath)) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  if (!isPosterFile(req.params.filename)) {
+    return res.status(400).json({ error: 'Not a poster file' });
+  }
+  const ext = path.extname(filepath).toLowerCase();
+  const mime = POSTER_MIME[ext];
+  if (!mime) return res.status(400).json({ error: 'Unsupported image type' });
+  res.set('Content-Type', mime);
+  res.set('Cache-Control', 'public, max-age=300');
+  fs.createReadStream(filepath).pipe(res);
+});
+
+app.post('/upload-poster', memUpload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  const videoName = req.body && req.body.videoName;
+  if (!videoName) return res.status(400).json({ error: 'videoName required' });
+
+  const videoPath = resolveSafe(videoName);
+  if (!videoPath || !fs.existsSync(videoPath)) {
+    return res.status(404).json({ error: 'Video not found' });
+  }
+
+  let ext = path.extname(req.file.originalname).toLowerCase();
+  if (!POSTER_EXTS.includes(ext)) {
+    const inferred = {
+      'image/jpeg': '.jpg',
+      'image/png': '.png',
+      'image/webp': '.webp',
+    }[req.file.mimetype];
+    if (!inferred) return res.status(400).json({ error: 'Only JPG / PNG / WEBP accepted' });
+    ext = inferred;
+  }
+
+  const base = baseNameNoExt(path.basename(videoPath));
+  removeExistingPosters(base);
+  const targetName = `${base}.poster${ext}`;
+  const targetPath = resolveSafe(targetName);
+  if (!targetPath) return res.status(400).json({ error: 'Invalid path' });
+
+  fs.writeFile(targetPath, req.file.buffer, (err) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({
+      name: targetName,
+      videoName: path.basename(videoPath),
+      url: `/poster/${encodeURIComponent(targetName)}`,
+    });
+  });
+});
+
+app.delete('/poster/:videoName', (req, res) => {
+  const videoPath = resolveSafe(req.params.videoName);
+  if (!videoPath) return res.status(400).json({ error: 'Invalid path' });
+  const base = baseNameNoExt(path.basename(videoPath));
+  removeExistingPosters(base);
+  res.json({ ok: true });
+});
+
+// ---------- TMDB proxy (poster lookup) ----------
+
+app.get('/tmdb/status', (req, res) => {
+  res.json({ configured: Boolean(TMDB_API_KEY) });
+});
+
+app.get('/tmdb/suggest-query', (req, res) => {
+  const filename = (req.query.filename || '').trim();
+  if (!filename) return res.status(400).json({ error: 'filename required' });
+  res.json({ query: cleanQueryForTmdb(filename) });
+});
+
+app.get('/tmdb/search', async (req, res) => {
+  if (!TMDB_API_KEY) {
+    return res.status(503).json({
+      error: 'TMDB_API_KEY not configured. Add it to .env to enable poster lookup.',
+    });
+  }
+  const q = String(req.query.q || '').trim();
+  if (!q) return res.status(400).json({ error: 'q required' });
+  try {
+    const url =
+      `https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(q)}` +
+      `&include_adult=false&language=en-US&page=1&api_key=${encodeURIComponent(TMDB_API_KEY)}`;
+    const r = await fetch(url);
+    if (!r.ok) return res.status(r.status).json({ error: `TMDB ${r.status}` });
+    const data = await r.json();
+    const results = (data.results || []).slice(0, 12).map((m) => ({
+      id: m.id,
+      title: m.title,
+      year: m.release_date ? m.release_date.slice(0, 4) : null,
+      overview: m.overview,
+      posterPath: m.poster_path,
+      posterUrl: m.poster_path ? `https://image.tmdb.org/t/p/w342${m.poster_path}` : null,
+    }));
+    res.json({ query: q, results });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/tmdb/fetch-poster', async (req, res) => {
+  if (!TMDB_API_KEY) {
+    return res.status(503).json({ error: 'TMDB_API_KEY not configured' });
+  }
+  const { videoName, posterPath } = req.body || {};
+  if (!videoName) return res.status(400).json({ error: 'videoName required' });
+  if (!posterPath || !/^\/[\w./-]+\.(jpg|jpeg|png|webp)$/i.test(posterPath)) {
+    return res.status(400).json({ error: 'Valid posterPath required' });
+  }
+  const videoPath = resolveSafe(videoName);
+  if (!videoPath || !fs.existsSync(videoPath)) {
+    return res.status(404).json({ error: 'Video not found' });
+  }
+  try {
+    const r = await fetch(`https://image.tmdb.org/t/p/w780${posterPath}`);
+    if (!r.ok) return res.status(r.status).json({ error: `Fetch ${r.status}` });
+    const buf = Buffer.from(await r.arrayBuffer());
+
+    let ext = path.extname(posterPath).toLowerCase();
+    if (!POSTER_EXTS.includes(ext)) ext = '.jpg';
+    const base = baseNameNoExt(path.basename(videoPath));
+    removeExistingPosters(base);
+    const targetName = `${base}.poster${ext}`;
+    const targetPath = resolveSafe(targetName);
+    if (!targetPath) return res.status(400).json({ error: 'Invalid path' });
+    fs.writeFileSync(targetPath, buf);
+    res.json({
+      name: targetName,
+      videoName: path.basename(videoPath),
+      url: `/poster/${encodeURIComponent(targetName)}`,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ---------- Torrents ----------
