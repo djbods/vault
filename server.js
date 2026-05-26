@@ -116,6 +116,69 @@ const isPosterFile = (name) => /\.poster\.(jpg|jpeg|png|webp)$/i.test(name);
 const srtToVtt = (srt) =>
   'WEBVTT\n\n' + srt.replace(/\r+/g, '').replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
 
+// ---------- Library metadata (watched flag, genres, etc.) ----------
+//
+// Stored as a single JSON sidecar in LIBRARY_DIR. Keyed by video filename
+// (basename, including extension). One file keeps writes atomic and lets
+// us hand the whole map to the frontend without n filesystem hits.
+// Leading dot keeps it out of /videos listings.
+const METADATA_PATH = path.join(VIDEOS_DIR, '.vault-library.json');
+
+let metadataCache = null;
+const loadMetadata = () => {
+  if (metadataCache) return metadataCache;
+  try {
+    if (fs.existsSync(METADATA_PATH)) {
+      const parsed = JSON.parse(fs.readFileSync(METADATA_PATH, 'utf-8'));
+      metadataCache = parsed && parsed.videos ? parsed : { version: 1, videos: {} };
+    } else {
+      metadataCache = { version: 1, videos: {} };
+    }
+  } catch (err) {
+    // Corrupted file — log and start fresh rather than crash the server.
+    console.warn(`[metadata] failed to read ${METADATA_PATH}: ${err.message}`);
+    metadataCache = { version: 1, videos: {} };
+  }
+  return metadataCache;
+};
+
+const saveMetadata = () => {
+  if (!metadataCache) return;
+  try {
+    fs.writeFileSync(METADATA_PATH, JSON.stringify(metadataCache, null, 2));
+  } catch (err) {
+    console.warn(`[metadata] failed to write ${METADATA_PATH}: ${err.message}`);
+  }
+};
+
+const getVideoMeta = (filename) => {
+  const data = loadMetadata();
+  return data.videos[filename] || {};
+};
+
+const setVideoMeta = (filename, patch) => {
+  const data = loadMetadata();
+  const current = data.videos[filename] || {};
+  data.videos[filename] = { ...current, ...patch };
+  saveMetadata();
+  return data.videos[filename];
+};
+
+const renameVideoMeta = (oldName, newName) => {
+  const data = loadMetadata();
+  if (!data.videos[oldName]) return;
+  data.videos[newName] = data.videos[oldName];
+  delete data.videos[oldName];
+  saveMetadata();
+};
+
+const removeVideoMeta = (filename) => {
+  const data = loadMetadata();
+  if (!data.videos[filename]) return;
+  delete data.videos[filename];
+  saveMetadata();
+};
+
 // Uploads land in a local staging area first — we transcode (or remux) into
 // VIDEOS_DIR after multer finishes. Keeps the raw upload off iCloud so we
 // don't sync the source then immediately sync the transcoded result.
@@ -257,12 +320,17 @@ app.get('/videos', (req, res) => {
         const filepath = path.join(VIDEOS_DIR, e.name);
         const stat = fs.statSync(filepath);
         const poster = findPoster(e.name);
+        const meta = getVideoMeta(e.name);
         return {
           name: e.name,
           size: stat.size,
           modified: stat.mtime.toISOString(),
           duration: null,
           poster: poster ? `/poster/${encodeURIComponent(poster)}` : null,
+          watched: Boolean(meta.watched),
+          watchedAt: meta.watchedAt || null,
+          genres: Array.isArray(meta.genres) ? meta.genres : [],
+          tmdbId: meta.tmdbId || null,
         };
       })
       .sort((a, b) => b.modified.localeCompare(a.modified));
@@ -586,6 +654,37 @@ app.post('/videos/:filename/reprocess', async (req, res) => {
   }
 });
 
+// Partial-update endpoint for the per-video metadata sidecar. Body is a
+// JSON object whose keys override existing metadata; pass `null` to clear
+// a key. Currently used for the watched flag (#1) and TMDB genre tags (#5),
+// but kept generic so future fields don't need their own route.
+app.patch('/videos/:filename/metadata', (req, res) => {
+  const filepath = resolveSafe(req.params.filename);
+  if (!filepath || !fs.existsSync(filepath)) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  const filename = path.basename(filepath);
+  const body = req.body || {};
+  const patch = {};
+
+  if (Object.prototype.hasOwnProperty.call(body, 'watched')) {
+    patch.watched = Boolean(body.watched);
+    patch.watchedAt = patch.watched ? new Date().toISOString() : null;
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'genres')) {
+    patch.genres = Array.isArray(body.genres) ? body.genres.map(String) : [];
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'tmdbId')) {
+    patch.tmdbId = body.tmdbId == null ? null : Number(body.tmdbId) || null;
+  }
+  if (!Object.keys(patch).length) {
+    return res.status(400).json({ error: 'No supported fields in body' });
+  }
+
+  const updated = setVideoMeta(filename, patch);
+  res.json({ name: filename, metadata: updated });
+});
+
 app.get('/stream/:filename', (req, res) => {
   const filepath = resolveSafe(req.params.filename);
   if (!filepath || !fs.existsSync(filepath)) {
@@ -662,6 +761,9 @@ app.post('/videos/:filename/rename', (req, res) => {
     return res.status(500).json({ error: e.message });
   }
 
+  // Carry the existing metadata entry over to the new filename key.
+  renameVideoMeta(path.basename(filepath), path.basename(newVideoPath));
+
   // Rename all sidecars (posters + subtitles) that share the old base.
   const renamed = [path.basename(newVideoPath)];
   const entries = fs.readdirSync(VIDEOS_DIR);
@@ -689,6 +791,7 @@ app.delete('/videos/:filename', (req, res) => {
     return res.status(404).json({ error: 'Not found' });
   }
   const base = baseNameNoExt(path.basename(filepath));
+  removeVideoMeta(path.basename(filepath));
   fs.unlink(filepath, (err) => {
     if (err) return res.status(500).json({ error: err.message });
     fs.readdir(VIDEOS_DIR, (readErr, entries) => {
