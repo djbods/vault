@@ -529,16 +529,13 @@
         flex: 0 0 200px;
         scroll-snap-align: start;
       }
+      /* Shelf cards never bloom — they stay at slot size and just gain a
+         soft shadow on hover. Anchor classes are not applied in shelves
+         (the renderer skips attachAnchorOnHover), so a single base hover
+         rule is enough. */
       .shelf-row .card:hover {
         width: 100%;
-        left: 50%;
-        right: auto;
-        transform: translate(-50%, -50%);
         box-shadow: 0 14px 32px -10px rgba(0, 0, 0, 0.6);
-      }
-      .shelf-row .card.anchor-left:hover,
-      .shelf-row .card.anchor-right:hover {
-        transform: translateY(-50%);
       }
 
       .card-meta {
@@ -3174,11 +3171,11 @@
         else alert('Failed to delete');
       };
 
-      const renderCard = (video) => {
+      const renderCard = (video, { inShelf = false } = {}) => {
         const slot = document.createElement('div');
         slot.className = 'card-slot';
         const card = document.createElement('div');
-        card.className = 'card' + (video.watched ? ' card--watched' : '');
+        card.className = 'card' + (video.watched ? ' card--watched' : '') + (inShelf ? ' card--shelf' : '');
         const streamUrl = `${API}/stream/${encodeURIComponent(video.name)}`;
         const posterHtml = video.poster
           ? `<img class="poster-img" src="${API}${video.poster}" alt="" loading="lazy"/>`
@@ -3247,8 +3244,15 @@
           e.stopPropagation();
           openEditModal(video.name);
         });
-        attachHoverPreview(card, video, streamUrl);
-        attachAnchorOnHover(card, slot);
+        // Shelf cards stay at slot size — they don't bloom into landscape
+        // because the row is horizontally scrollable. Skipping the hover
+        // handlers also avoids the anchor logic (which measures against the
+        // main grid and would shove the card sideways inside its shelf
+        // slot).
+        if (!inShelf) {
+          attachHoverPreview(card, video, streamUrl);
+          attachAnchorOnHover(card, slot);
+        }
         slot.appendChild(card);
         return slot;
       };
@@ -3357,7 +3361,7 @@
           return;
         }
         sectionEl.hidden = false;
-        items.forEach((v) => rowEl.appendChild(renderCard(v)));
+        items.forEach((v) => rowEl.appendChild(renderCard(v, { inShelf: true })));
       };
 
       const renderShelves = (videos) => {
