@@ -298,7 +298,8 @@
       }
 
       #grid {
-        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 32px;
       }
 
       /* Library cards are portrait at rest, expand horizontally to landscape
@@ -480,6 +481,21 @@
         letter-spacing: 0.18em;
         text-transform: uppercase;
         color: var(--text-dim);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .card-meta .dot {
+        width: 3px;
+        height: 3px;
+        border-radius: 50%;
+        background: currentColor;
+        opacity: 0.5;
+      }
+      .card-meta-size {
+        color: var(--text-faint);
+        font-size: 10px;
       }
 
       .card-delete {
@@ -1650,35 +1666,100 @@
         background: rgba(212, 160, 74, 0.1);
       }
 
-      @media (max-width: 720px) {
+      /* Tablet — keep hover-expand but tighten card width so we fit three
+         cards on a typical iPad portrait viewport. */
+      @media (max-width: 1024px) {
         header {
-          padding: 20px 24px;
-          flex-wrap: wrap;
-          gap: 18px;
+          padding: 24px 32px;
         }
         main {
-          padding: 32px 24px 60px;
-        }
-        .brand {
-          font-size: 22px;
-          letter-spacing: 0.5em;
-          padding-left: 0.5em;
-        }
-        .upload-btn,
-        .tab {
-          padding: 10px 14px;
-          font-size: 10px;
-          letter-spacing: 0.25em;
-        }
-        .grid {
-          grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-          gap: 18px;
+          padding: 36px 32px 72px;
         }
         #grid {
-          grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+          grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+          gap: 24px;
         }
+      }
+
+      /* Phone — fixed 2-column grid, no hover-expand. Mirrors the Netflix
+         mobile app's at-a-glance browsing pattern: portrait posters big
+         enough to read, tap to play directly. */
+      @media (max-width: 720px) {
+        header {
+          padding: 18px 16px;
+          flex-wrap: wrap;
+          gap: 14px;
+        }
+        main {
+          padding: 24px 16px 56px;
+        }
+        .brand {
+          font-size: 20px;
+          letter-spacing: 0.4em;
+        }
+        .brand-sub { display: none; }
+        .tabs { gap: 0; }
+        .upload-btn,
+        .tab {
+          padding: 9px 12px;
+          font-size: 10px;
+          letter-spacing: 0.22em;
+        }
+        .tab.active::after { left: 12px; right: 12px; }
+        .genre-bar {
+          margin-left: -16px;
+          margin-right: -16px;
+          padding: 0 16px 6px;
+        }
+        .grid {
+          grid-template-columns: repeat(2, 1fr);
+          gap: 16px;
+        }
+        #grid {
+          grid-template-columns: repeat(2, 1fr);
+          gap: 16px;
+        }
+        .card-info {
+          padding: 12px 14px 12px;
+        }
+        .card-title { font-size: 15px; }
+        .card-meta { font-size: 10px; letter-spacing: 0.12em; gap: 6px; }
+        .card-watched-badge {
+          padding: 4px 8px 4px 6px;
+          font-size: 8px;
+          letter-spacing: 0.25em;
+          top: 8px;
+          left: 8px;
+        }
+        .card-watched-badge svg { width: 9px; height: 9px; }
         .magnet-row {
           flex-direction: column;
+        }
+      }
+
+      /* Touch devices — hover-expand is a desktop affordance; on a phone or
+         iPad the expanded card jumps out of viewport and the autoplay
+         preview eats data. Disable the expansion, and always show the
+         delete + edit buttons (they have no hover trigger to rely on). */
+      @media (hover: none) {
+        .card:hover {
+          width: 100%;
+          left: 50%;
+          right: auto;
+          transform: translate(-50%, -50%);
+          box-shadow: none;
+          border-color: rgba(255, 255, 255, 0.05);
+        }
+        .card.anchor-left:hover,
+        .card.anchor-right:hover {
+          transform: translateY(-50%);
+        }
+        .card.anchor-left:hover { left: 0; }
+        .card.anchor-right:hover { left: auto; right: 0; }
+        .card:hover .card-play { opacity: 0; }
+        .card-delete,
+        .card-edit {
+          opacity: 1;
         }
       }
     </style>
@@ -2959,7 +3040,13 @@
           </button>
           <div class="card-info">
             <h3 class="card-title">${cleanName(video.name)}</h3>
-            <div class="card-meta">${formatSize(video.size)}</div>
+            <div class="card-meta">
+              ${video.year ? `<span>${video.year}</span>` : ''}
+              ${video.year && (video.genres || []).length ? `<span class="dot"></span>` : ''}
+              ${(video.genres || []).length ? `<span>${escapeHtml(video.genres[0])}</span>` : ''}
+              ${(video.year || (video.genres || []).length) ? `<span class="dot"></span>` : ''}
+              <span class="card-meta-size">${formatSize(video.size)}</span>
+            </div>
           </div>
         `;
         card.addEventListener('click', (e) => {
