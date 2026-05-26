@@ -331,6 +331,8 @@ app.get('/videos', (req, res) => {
           watchedAt: meta.watchedAt || null,
           genres: Array.isArray(meta.genres) ? meta.genres : [],
           tmdbId: meta.tmdbId || null,
+          year: meta.year || null,
+          runtime: meta.runtime || null,
         };
       })
       .sort((a, b) => b.modified.localeCompare(a.modified));
@@ -1033,11 +1035,34 @@ app.get('/tmdb/search', async (req, res) => {
   }
 });
 
+// Fetch TMDB movie details (resolves genre names + release year). Cached
+// per-id since the data is effectively immutable.
+const tmdbMovieCache = new Map();
+const fetchTmdbMovieDetails = async (tmdbId) => {
+  if (!TMDB_API_KEY) throw new Error('TMDB_API_KEY not configured');
+  const id = Number(tmdbId);
+  if (!Number.isFinite(id) || id <= 0) throw new Error('Invalid tmdbId');
+  if (tmdbMovieCache.has(id)) return tmdbMovieCache.get(id);
+  const r = await fetch(
+    `https://api.themoviedb.org/3/movie/${id}?api_key=${TMDB_API_KEY}&language=en-US`
+  );
+  if (!r.ok) throw new Error(`TMDB ${r.status}`);
+  const data = await r.json();
+  const result = {
+    tmdbId: id,
+    year: data.release_date ? data.release_date.slice(0, 4) : null,
+    genres: Array.isArray(data.genres) ? data.genres.map((g) => g.name) : [],
+    runtime: data.runtime || null,
+  };
+  tmdbMovieCache.set(id, result);
+  return result;
+};
+
 app.post('/tmdb/fetch-poster', async (req, res) => {
   if (!TMDB_API_KEY) {
     return res.status(503).json({ error: 'TMDB_API_KEY not configured' });
   }
-  const { videoName, posterPath } = req.body || {};
+  const { videoName, posterPath, tmdbId } = req.body || {};
   if (!videoName) return res.status(400).json({ error: 'videoName required' });
   if (!posterPath || !/^\/[\w./-]+\.(jpg|jpeg|png|webp)$/i.test(posterPath)) {
     return res.status(400).json({ error: 'Valid posterPath required' });
@@ -1059,11 +1084,59 @@ app.post('/tmdb/fetch-poster', async (req, res) => {
     const targetPath = resolveSafe(targetName);
     if (!targetPath) return res.status(400).json({ error: 'Invalid path' });
     fs.writeFileSync(targetPath, buf);
+
+    // Best-effort: pull genres + year off the same TMDB id and persist
+    // them so the filter pills + card meta lines have something to show.
+    // If the lookup fails (rate limit, network), we still return the
+    // poster — the user can always re-pick later to retry.
+    let metadata = null;
+    if (tmdbId) {
+      try {
+        const details = await fetchTmdbMovieDetails(tmdbId);
+        metadata = setVideoMeta(path.basename(videoPath), {
+          tmdbId: details.tmdbId,
+          genres: details.genres,
+          year: details.year,
+          runtime: details.runtime,
+        });
+      } catch (e) {
+        console.warn(`[tmdb] details fetch failed for ${tmdbId}: ${e.message}`);
+      }
+    }
+
     res.json({
       name: targetName,
       videoName: path.basename(videoPath),
       url: `/poster/${encodeURIComponent(targetName)}`,
+      metadata,
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Pull TMDB details (genres, year) for a video without touching its
+// poster. Useful for backfilling movies that already have artwork but
+// no genre tags. Body: { videoName, tmdbId }.
+app.post('/tmdb/save-metadata', async (req, res) => {
+  if (!TMDB_API_KEY) {
+    return res.status(503).json({ error: 'TMDB_API_KEY not configured' });
+  }
+  const { videoName, tmdbId } = req.body || {};
+  if (!videoName) return res.status(400).json({ error: 'videoName required' });
+  const videoPath = resolveSafe(videoName);
+  if (!videoPath || !fs.existsSync(videoPath)) {
+    return res.status(404).json({ error: 'Video not found' });
+  }
+  try {
+    const details = await fetchTmdbMovieDetails(tmdbId);
+    const metadata = setVideoMeta(path.basename(videoPath), {
+      tmdbId: details.tmdbId,
+      genres: details.genres,
+      year: details.year,
+      runtime: details.runtime,
+    });
+    res.json({ name: path.basename(videoPath), metadata });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

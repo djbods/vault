@@ -226,6 +226,70 @@
         background: linear-gradient(90deg, rgba(212, 160, 74, 0.12), transparent);
       }
 
+      /* Genre filter pills. Horizontal-scrolling row that replaces the
+         old "Your Library" heading. Pills are multi-select toggles; an
+         empty selection means "show everything". */
+      .genre-bar {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 32px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding-bottom: 4px;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(212, 160, 74, 0.2) transparent;
+      }
+      .genre-bar::-webkit-scrollbar { height: 4px; }
+      .genre-bar::-webkit-scrollbar-track { background: transparent; }
+      .genre-bar::-webkit-scrollbar-thumb {
+        background: rgba(212, 160, 74, 0.18);
+        border-radius: 2px;
+      }
+
+      .genre-pill {
+        flex: 0 0 auto;
+        font-family: 'DM Sans', sans-serif;
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        padding: 8px 16px;
+        background: var(--surface);
+        color: var(--text-dim);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 999px;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: all 0.25s ease;
+      }
+      .genre-pill:hover {
+        color: var(--text);
+        border-color: rgba(255, 255, 255, 0.15);
+      }
+      .genre-pill.active {
+        color: var(--gold);
+        background: rgba(212, 160, 74, 0.14);
+        border-color: var(--gold);
+      }
+      .genre-pill.genre-pill--all {
+        font-weight: 600;
+        letter-spacing: 0.3em;
+      }
+      .genre-pill.genre-pill--all.active {
+        color: var(--gold);
+        background: rgba(212, 160, 74, 0.2);
+      }
+
+      .grid-empty-msg {
+        grid-column: 1 / -1;
+        color: var(--text-dim);
+        font-size: 12px;
+        letter-spacing: 0.25em;
+        text-transform: uppercase;
+        text-align: center;
+        padding: 40px 0;
+      }
+
       .grid {
         display: grid;
         /* Set autotrack */
@@ -1635,7 +1699,7 @@
 
       <main>
         <section class="view active" id="viewLibrary">
-          <div class="section-label">Your Library</div>
+          <div class="genre-bar" id="genreBar"></div>
           <div class="grid" id="grid"></div>
           <div class="empty" id="libraryEmpty" style="display: none">
             <div class="empty-icon">∅</div>
@@ -2231,11 +2295,11 @@
         });
       };
 
-      const fetchTmdbPoster = (posterPath, videoName) =>
+      const fetchTmdbPoster = (posterPath, videoName, tmdbId) =>
         fetch(`${API}/tmdb/fetch-poster`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ posterPath, videoName }),
+          body: JSON.stringify({ posterPath, videoName, tmdbId }),
         }).then(async (r) => {
           if (!r.ok) {
             const body = await r.json().catch(() => ({}));
@@ -2249,7 +2313,7 @@
 
       const applyPoster = async (poster, videoName) => {
         if (poster.kind === 'file') return uploadPosterFile(poster.file, videoName);
-        if (poster.kind === 'tmdb') return fetchTmdbPoster(poster.posterPath, videoName);
+        if (poster.kind === 'tmdb') return fetchTmdbPoster(poster.posterPath, videoName, poster.tmdbId);
       };
 
       // ---- TMDB picker
@@ -2291,6 +2355,7 @@
             grid.querySelectorAll('.tmdb-card').forEach((c) => c.classList.remove('selected'));
             card.classList.add('selected');
             posterTmdbSelected = {
+              tmdbId: m.id,
               posterPath: m.posterPath,
               previewUrl: m.posterUrl,
               title: m.title,
@@ -2375,6 +2440,7 @@
         } else {
           stagedPoster = {
             kind: 'tmdb',
+            tmdbId: posterTmdbSelected.tmdbId,
             posterPath: posterTmdbSelected.posterPath,
             previewUrl: posterTmdbSelected.previewUrl,
             title: posterTmdbSelected.title,
@@ -2934,19 +3000,96 @@
         });
       };
 
+      // Genre filter state — Set of selected genre names. Empty set means
+      // "show everything". Persisted to localStorage so the user's last
+      // filter sticks across reloads.
+      const GENRE_STORAGE_KEY = 'vault.selectedGenres';
+      const selectedGenres = new Set(
+        (() => {
+          try {
+            const raw = localStorage.getItem(GENRE_STORAGE_KEY);
+            return raw ? JSON.parse(raw) : [];
+          } catch {
+            return [];
+          }
+        })()
+      );
+      let libraryCache = [];
+      const genreBarEl = document.getElementById('genreBar');
+
+      const persistGenres = () => {
+        try {
+          localStorage.setItem(GENRE_STORAGE_KEY, JSON.stringify([...selectedGenres]));
+        } catch {}
+      };
+
+      const renderGenrePills = (videos) => {
+        // Build the union of genres present in the current library, sorted
+        // alphabetically so the pill order is stable. Filters that point
+        // at a genre no longer in the library are dropped silently.
+        const genres = new Set();
+        videos.forEach((v) => (v.genres || []).forEach((g) => genres.add(g)));
+        const list = [...genres].sort((a, b) => a.localeCompare(b));
+        for (const g of [...selectedGenres]) {
+          if (!genres.has(g)) selectedGenres.delete(g);
+        }
+
+        genreBarEl.innerHTML = '';
+        const all = document.createElement('button');
+        all.type = 'button';
+        all.className = 'genre-pill genre-pill--all' + (selectedGenres.size === 0 ? ' active' : '');
+        all.textContent = 'All';
+        all.addEventListener('click', () => {
+          selectedGenres.clear();
+          persistGenres();
+          renderGenrePills(libraryCache);
+          renderLibrary();
+        });
+        genreBarEl.appendChild(all);
+
+        list.forEach((g) => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'genre-pill' + (selectedGenres.has(g) ? ' active' : '');
+          btn.textContent = g;
+          btn.addEventListener('click', () => {
+            if (selectedGenres.has(g)) selectedGenres.delete(g);
+            else selectedGenres.add(g);
+            persistGenres();
+            renderGenrePills(libraryCache);
+            renderLibrary();
+          });
+          genreBarEl.appendChild(btn);
+        });
+      };
+
+      const renderLibrary = () => {
+        const matches = selectedGenres.size === 0
+          ? libraryCache
+          : libraryCache.filter((v) =>
+              (v.genres || []).some((g) => selectedGenres.has(g))
+            );
+        gridEl.innerHTML = '';
+        if (!libraryCache.length) {
+          libraryEmpty.style.display = 'flex';
+          gridEl.style.display = 'none';
+          return;
+        }
+        libraryEmpty.style.display = 'none';
+        gridEl.style.display = 'grid';
+        if (!matches.length) {
+          gridEl.innerHTML = `<div class="grid-empty-msg">No films in this selection.</div>`;
+          return;
+        }
+        matches.forEach((v) => gridEl.appendChild(renderCard(v)));
+      };
+
       const loadVideos = async () => {
         try {
           const res = await fetch(`${API}/videos`);
-          const videos = await res.json();
-          gridEl.innerHTML = '';
-          if (!videos.length) {
-            libraryEmpty.style.display = 'flex';
-            gridEl.style.display = 'none';
-          } else {
-            libraryEmpty.style.display = 'none';
-            gridEl.style.display = 'grid';
-            videos.forEach((v) => gridEl.appendChild(renderCard(v)));
-          }
+          libraryCache = await res.json();
+          renderGenrePills(libraryCache);
+          renderLibrary();
         } catch {
           gridEl.innerHTML = `<div style="grid-column:1/-1;color:var(--text-dim);font-size:13px;letter-spacing:0.2em;text-transform:uppercase;padding:40px 0;text-align:center;">Cannot reach server at ${API}. Start it with <code style="color:var(--gold)">npm start</code>.</div>`;
         }
