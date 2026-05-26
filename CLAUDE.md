@@ -290,22 +290,24 @@ Aesthetic principles:
 
 ## Known gaps / future work
 
-- Stock `<video controls>` chrome — a custom Netflix-style player with
-  larger scrub bar, subtitle/audio menus, keyboard shortcuts, and mobile
-  gestures is planned (next session).
-- No "watched" indicator yet (in progress this session).
-- No torrent pause/resume + no download ETA (in progress this session).
-- No genre / category filtering — "Your Library" heading planned to be
-  replaced with TMDB-derived genre filter pills (in progress this
-  session).
-- Card grid sizing isn't tuned for mobile yet (in progress this session).
-- TMDB search returns title/year/overview/poster but doesn't persist
-  metadata. Once we start storing TMDB metadata for genre filtering,
-  consider also storing overview + year + runtime for richer cards.
-- README is stale vs the actual feature set. Worth a refresh once the
-  current session lands.
+- **Custom Netflix-style player** — still on the stock `<video controls>`
+  chrome. Next session's main item: bigger scrub bar, custom
+  subtitle/audio menus, keyboard shortcuts, mobile gestures, persistent
+  resume position (the `resumePosition` field is already supported by
+  the metadata sidecar, just not written yet).
+- TMDB-derived genre data is only populated when the user picks a
+  poster (or via `/tmdb/save-metadata` backfill). Consider auto-running
+  the lookup on first library load for any video that has no `tmdbId`
+  but a confident filename match.
+- README is still stale vs the actual feature set — worth a refresh.
+- Overview / cast / director from TMDB still aren't stored; would feed
+  into a richer detail view if/when one exists.
+- The auto-mark-watched fires on the `ended` event only. If the user
+  quits 30 seconds early it stays "unwatched" — a 95%-played heuristic
+  on `timeupdate` would be more forgiving.
 
 ---
 
-*Last updated: 2026-05-26 — Initial CLAUDE.md after feat branches were
-fast-forwarded into master.*
+*Last updated: 2026-05-26 — Session 1 wrap-up: torrent pause/resume +
+ETA, watched indicator + metadata sidecar, TMDB genre persistence +
+pill filter, larger cards + mobile grid all landed.*
