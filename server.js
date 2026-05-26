@@ -440,13 +440,29 @@ app.get('/tmdb/search', async (req, res) => {
       error: 'TMDB_API_KEY not configured. Add it to .env to enable poster lookup.',
     });
   }
-  const q = String(req.query.q || '').trim();
-  if (!q) return res.status(400).json({ error: 'q required' });
+  const raw = String(req.query.q || '').trim();
+  if (!raw) return res.status(400).json({ error: 'q required' });
+
+  // TMDB matches poorly when the year is embedded in the title, but well when
+  // passed as a separate `year` filter. Pull a trailing 4-digit year out.
+  let title = raw;
+  let year = String(req.query.year || '').trim();
+  const trailingYear = raw.match(/^(.*?)\s+(?:\(|\[)?(\d{4})(?:\)|\])?\s*$/);
+  if (!year && trailingYear) {
+    title = trailingYear[1].trim();
+    year = trailingYear[2];
+  }
+
   try {
-    const url =
-      `https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(q)}` +
-      `&include_adult=false&language=en-US&page=1&api_key=${encodeURIComponent(TMDB_API_KEY)}`;
-    const r = await fetch(url);
+    const params = new URLSearchParams({
+      query: title,
+      include_adult: 'false',
+      language: 'en-US',
+      page: '1',
+      api_key: TMDB_API_KEY,
+    });
+    if (year) params.set('year', year);
+    const r = await fetch(`https://api.themoviedb.org/3/search/movie?${params.toString()}`);
     if (!r.ok) return res.status(r.status).json({ error: `TMDB ${r.status}` });
     const data = await r.json();
     const results = (data.results || []).slice(0, 12).map((m) => ({
@@ -457,7 +473,7 @@ app.get('/tmdb/search', async (req, res) => {
       posterPath: m.poster_path,
       posterUrl: m.poster_path ? `https://image.tmdb.org/t/p/w342${m.poster_path}` : null,
     }));
-    res.json({ query: q, results });
+    res.json({ query: raw, title, year: year || null, results });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
