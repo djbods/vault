@@ -4,14 +4,29 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const { promisify } = require('util');
+const { spawn } = require('child_process');
 const pipeline = promisify(require('stream').pipeline);
 
+// Expand a leading "~" so .env paths like "~/Library/..." work. Node's
+// path helpers don't do this automatically.
+const expandPath = (p) => {
+  if (!p) return p;
+  if (p === '~') return os.homedir();
+  if (p.startsWith('~/')) return path.join(os.homedir(), p.slice(2));
+  return p;
+};
+
 const PORT = process.env.PORT || 3001;
-const VIDEOS_DIR = path.join(__dirname, 'videos');
-const TORRENT_DIR = path.join(__dirname, 'torrent-cache');
+// LIBRARY_DIR is where finished videos, posters, and subtitles live — can
+// point at iCloud Drive or any other location. TORRENT_DIR is the temp
+// download cache; keep it on local disk to avoid sync churn (every piece
+// write would otherwise trigger an iCloud upload).
+const VIDEOS_DIR = expandPath(process.env.LIBRARY_DIR) || path.join(__dirname, 'videos');
+const TORRENT_DIR = expandPath(process.env.TORRENT_DIR) || path.join(__dirname, 'torrent-cache');
 
 if (!fs.existsSync(VIDEOS_DIR)) {
   fs.mkdirSync(VIDEOS_DIR, { recursive: true });
@@ -101,8 +116,16 @@ const isPosterFile = (name) => /\.poster\.(jpg|jpeg|png|webp)$/i.test(name);
 const srtToVtt = (srt) =>
   'WEBVTT\n\n' + srt.replace(/\r+/g, '').replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
 
+// Uploads land in a local staging area first — we transcode (or remux) into
+// VIDEOS_DIR after multer finishes. Keeps the raw upload off iCloud so we
+// don't sync the source then immediately sync the transcoded result.
+const UPLOAD_STAGING_DIR = path.join(TORRENT_DIR, 'uploads');
+if (!fs.existsSync(UPLOAD_STAGING_DIR)) {
+  fs.mkdirSync(UPLOAD_STAGING_DIR, { recursive: true });
+}
+
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, VIDEOS_DIR),
+  destination: (req, file, cb) => cb(null, UPLOAD_STAGING_DIR),
   filename: (req, file, cb) => {
     const safe = sanitize(file.originalname);
     cb(null, safe || `upload-${Date.now()}.mp4`);
@@ -178,15 +201,26 @@ app.get('/', (req, res) => {
 
 // ---------- Local videos ----------
 
-app.post('/upload', upload.single('file'), (req, res) => {
+app.post('/upload', upload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
   }
-  res.json({
-    name: req.file.filename,
-    size: req.file.size,
-    mimetype: req.file.mimetype,
-  });
+  const stagedPath = req.file.path;
+  try {
+    const targetBase = sanitize(baseNameNoExt(req.file.filename)) || `upload-${Date.now()}`;
+    const outPath = await prepareForLibrary(stagedPath, VIDEOS_DIR, targetBase);
+    const stat = fs.statSync(outPath);
+    res.json({
+      name: path.basename(outPath),
+      size: stat.size,
+      mimetype: 'video/mp4',
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  } finally {
+    // Always clean up the staged upload, success or failure.
+    fs.unlink(stagedPath, () => {});
+  }
 });
 
 app.get('/videos', (req, res) => {
@@ -217,6 +251,105 @@ app.get('/videos', (req, res) => {
   });
 });
 
+// Audio codecs that browsers decode natively — these are stream-copied
+// straight into the library MP4 with no re-encode. Everything else
+// (AC3/EAC3/DTS/TrueHD/etc) gets transcoded to AAC at import time.
+const BROWSER_FRIENDLY_AUDIO = new Set([
+  'aac', 'mp3', 'opus', 'vorbis', 'flac',
+]);
+
+// Probe a media file once and cache the result. Used by prepareForLibrary
+// to decide between stream-copy and audio re-encode.
+const probeCache = new Map();
+const probeFile = (filepath) =>
+  new Promise((resolve, reject) => {
+    const cached = probeCache.get(filepath);
+    if (cached) return resolve(cached);
+    const ff = spawn('ffprobe', [
+      '-v', 'error',
+      '-show_entries', 'stream=index,codec_type,codec_name:format=duration',
+      '-of', 'json',
+      filepath,
+    ]);
+    let out = '';
+    let err = '';
+    ff.stdout.on('data', (d) => (out += d.toString()));
+    ff.stderr.on('data', (d) => (err += d.toString()));
+    ff.on('error', reject);
+    ff.on('close', (code) => {
+      if (code !== 0) return reject(new Error(`ffprobe exit ${code}: ${err.trim()}`));
+      try {
+        const parsed = JSON.parse(out);
+        const streams = parsed.streams || [];
+        const audio = streams.find((s) => s.codec_type === 'audio');
+        const video = streams.find((s) => s.codec_type === 'video');
+        const result = {
+          audioCodec: audio ? (audio.codec_name || '').toLowerCase() : '',
+          videoCodec: video ? (video.codec_name || '').toLowerCase() : '',
+          duration: parseFloat((parsed.format || {}).duration) || 0,
+        };
+        probeCache.set(filepath, result);
+        resolve(result);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
+
+// Convert a source video into a browser-ready MP4 in the library. Video is
+// always copied (no re-encode → fast, lossless). Audio is copied if already
+// browser-friendly, otherwise re-encoded to AAC 256k. HEVC streams get the
+// hvc1 tag forced so Chrome/Safari accept the parameter sets in hvcC.
+// Writes <targetDir>/<targetBase>.mp4 with +faststart for byte-range play.
+const prepareForLibrary = async (srcPath, targetDir, targetBase) => {
+  const probe = await probeFile(srcPath).catch(() => ({ audioCodec: '', videoCodec: '' }));
+  const audioCodec = probe.audioCodec || '';
+  const videoCodec = probe.videoCodec || '';
+  const needsAudioTranscode = audioCodec && !BROWSER_FRIENDLY_AUDIO.has(audioCodec);
+  const isHevc = videoCodec === 'hevc' || videoCodec === 'h265';
+
+  const outPath = path.join(targetDir, `${targetBase}.mp4`);
+
+  return new Promise((resolve, reject) => {
+    const ffArgs = [
+      '-hide_banner',
+      '-loglevel', 'error',
+      '-fflags', '+genpts',
+      '-i', srcPath,
+      '-map', '0:v:0',
+      '-map', '0:a:0?',
+      '-c:v', 'copy',
+      ...(isHevc ? ['-tag:v', 'hvc1'] : []),
+      '-c:a', needsAudioTranscode ? 'aac' : 'copy',
+      ...(needsAudioTranscode ? ['-b:a', '256k'] : []),
+      // +faststart moves moov to the front so the result streams cleanly
+      // over byte-range from the first request.
+      '-movflags', '+faststart',
+      '-y',
+      outPath,
+    ];
+
+    const startedAt = Date.now();
+    const action = needsAudioTranscode ? 'transcode' : 'remux';
+    console.log(`[ffmpeg] ${action} ${path.basename(srcPath)} → ${path.basename(outPath)}`);
+
+    const ff = spawn('ffmpeg', ffArgs);
+    let stderr = '';
+    ff.stderr.on('data', (d) => (stderr += d.toString()));
+    ff.on('error', reject);
+    ff.on('close', (code) => {
+      if (code !== 0) {
+        // Clean up partial output so we don't leave a corrupted file behind.
+        try { fs.unlinkSync(outPath); } catch {}
+        return reject(new Error(`ffmpeg exit ${code}: ${stderr.trim().slice(0, 500)}`));
+      }
+      const took = ((Date.now() - startedAt) / 1000).toFixed(1);
+      console.log(`[ffmpeg] done in ${took}s → ${path.basename(outPath)}`);
+      resolve(outPath);
+    });
+  });
+};
+
 app.get('/stream/:filename', (req, res) => {
   const filepath = resolveSafe(req.params.filename);
   if (!filepath || !fs.existsSync(filepath)) {
@@ -225,6 +358,8 @@ app.get('/stream/:filename', (req, res) => {
 
   const stat = fs.statSync(filepath);
   const fileSize = stat.size;
+  // Native byte-range only — files are pre-conditioned at import time so
+  // they're guaranteed browser-decodable, no live transcoding needed.
   const range = req.headers.range;
   const contentType = mimeFor(filepath);
 
@@ -714,15 +849,24 @@ app.post('/torrent/:infoHash/save-to-library', async (req, res) => {
     state.savingToLibrary = true;
 
     const videoFile = state.torrent.files[state.mainFileIndex];
-    const targetVideoName = sanitize(videoFile.name) || `torrent-${req.params.infoHash}.mp4`;
-    const videoDest = resolveSafe(targetVideoName);
-    if (!videoDest) {
+    const sourcePath = path.join(state.torrent.path, videoFile.path);
+    if (!fs.existsSync(sourcePath)) {
+      state.savingToLibrary = false;
+      return res.status(500).json({ error: `Torrent file not found on disk: ${sourcePath}` });
+    }
+
+    // Build a safe library basename — output is always .mp4 regardless of
+    // input container; prepareForLibrary adds the extension.
+    const cleanedBase = sanitize(baseNameNoExt(videoFile.name)) || `torrent-${req.params.infoHash}`;
+    if (cleanedBase.includes('/') || cleanedBase.includes('..')) {
       state.savingToLibrary = false;
       return res.status(400).json({ error: 'Invalid filename' });
     }
 
-    // Stream the video file from the webtorrent store into ./videos/
-    await pipeline(videoFile.createReadStream(), fs.createWriteStream(videoDest));
+    // Transcode (or remux) the source into VIDEOS_DIR. Audio is converted
+    // to AAC if the source codec isn't browser-friendly; video is always
+    // stream-copied. HEVC gets the hvc1 tag.
+    const videoDest = await prepareForLibrary(sourcePath, VIDEOS_DIR, cleanedBase);
 
     // Copy subtitles, converting SRT → VTT, suffixed with detected language tag
     const videoBase = baseNameNoExt(path.basename(videoDest));
@@ -793,5 +937,6 @@ process.on('uncaughtException', (err) => {
 
 app.listen(PORT, () => {
   console.log(`VAULT server running at http://localhost:${PORT}`);
-  console.log(`Videos stored in: ${VIDEOS_DIR}`);
+  console.log(`Library:      ${VIDEOS_DIR}`);
+  console.log(`Torrent temp: ${TORRENT_DIR}`);
 });
