@@ -333,6 +333,9 @@ app.get('/videos', (req, res) => {
           tmdbId: meta.tmdbId || null,
           year: meta.year || null,
           runtime: meta.runtime || null,
+          resumePosition: typeof meta.resumePosition === 'number' ? meta.resumePosition : null,
+          duration: typeof meta.duration === 'number' ? meta.duration : null,
+          lastPlayedAt: meta.lastPlayedAt || null,
         };
       })
       .sort((a, b) => b.modified.localeCompare(a.modified));
@@ -672,12 +675,37 @@ app.patch('/videos/:filename/metadata', (req, res) => {
   if (Object.prototype.hasOwnProperty.call(body, 'watched')) {
     patch.watched = Boolean(body.watched);
     patch.watchedAt = patch.watched ? new Date().toISOString() : null;
+    // Marking a video watched implies "done with it" — drop the resume
+    // marker so it stops surfacing in the Continue Watching row.
+    if (patch.watched) {
+      patch.resumePosition = null;
+      patch.lastPlayedAt = null;
+    }
   }
   if (Object.prototype.hasOwnProperty.call(body, 'genres')) {
     patch.genres = Array.isArray(body.genres) ? body.genres.map(String) : [];
   }
   if (Object.prototype.hasOwnProperty.call(body, 'tmdbId')) {
     patch.tmdbId = body.tmdbId == null ? null : Number(body.tmdbId) || null;
+  }
+  // Resume position is in seconds. `null` clears it (e.g. when a video is
+  // marked watched and should drop out of the Continue Watching row).
+  // Writing a value also stamps `lastPlayedAt` so the row can sort by
+  // most-recent activity without the client having to compute it.
+  if (Object.prototype.hasOwnProperty.call(body, 'resumePosition')) {
+    const v = body.resumePosition;
+    const num = v == null ? null : Number(v);
+    patch.resumePosition = Number.isFinite(num) && num > 0 ? num : null;
+    patch.lastPlayedAt = patch.resumePosition == null ? null : new Date().toISOString();
+  }
+  // Playback duration (seconds), captured from the <video> element on first
+  // play. Distinct from `runtime` (minutes, from TMDB) — keep both so the
+  // detail view can show TMDB's number but the progress bar can use the
+  // real one.
+  if (Object.prototype.hasOwnProperty.call(body, 'duration')) {
+    const v = body.duration;
+    const num = v == null ? null : Number(v);
+    patch.duration = Number.isFinite(num) && num > 0 ? num : null;
   }
   if (!Object.keys(patch).length) {
     return res.status(400).json({ error: 'No supported fields in body' });

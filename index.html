@@ -475,6 +475,72 @@
         stroke-linejoin: round;
       }
 
+      /* Progress bar on cards that have a resume position. Sits above the
+         dark gradient so it stays visible on any poster. */
+      .card-progress {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 3px;
+        background: rgba(255, 255, 255, 0.08);
+        z-index: 4;
+        pointer-events: none;
+      }
+      .card-progress-fill {
+        height: 100%;
+        background: linear-gradient(90deg, var(--gold-deep), var(--gold), var(--gold-soft));
+        box-shadow: 0 0 8px rgba(212, 160, 74, 0.45);
+      }
+
+      /* Shelves — horizontal scrolling rows above the genre filter. Used
+         for "Continue Watching" and "Recently Added". Cards inside a shelf
+         don't bloom on hover (the row clips overflow), so we override the
+         expanded width back to 100%. */
+      .shelf {
+        margin: 0 0 40px;
+      }
+      .shelf[hidden] { display: none; }
+      .shelf-title {
+        font-family: 'Playfair Display', serif;
+        font-size: 22px;
+        font-weight: 500;
+        color: var(--text);
+        margin: 0 0 16px;
+        letter-spacing: 0.01em;
+      }
+      .shelf-row {
+        display: flex;
+        gap: 16px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 6px 2px 14px;
+        scroll-snap-type: x proximity;
+        scrollbar-width: thin;
+        scrollbar-color: var(--border-strong) transparent;
+      }
+      .shelf-row::-webkit-scrollbar { height: 6px; }
+      .shelf-row::-webkit-scrollbar-track { background: transparent; }
+      .shelf-row::-webkit-scrollbar-thumb {
+        background: var(--border-strong);
+        border-radius: 3px;
+      }
+      .shelf-row .card-slot {
+        flex: 0 0 200px;
+        scroll-snap-align: start;
+      }
+      .shelf-row .card:hover {
+        width: 100%;
+        left: 50%;
+        right: auto;
+        transform: translate(-50%, -50%);
+        box-shadow: 0 14px 32px -10px rgba(0, 0, 0, 0.6);
+      }
+      .shelf-row .card.anchor-left:hover,
+      .shelf-row .card.anchor-right:hover {
+        transform: translateY(-50%);
+      }
+
       .card-meta {
         font-family: 'DM Sans', sans-serif;
         font-size: 11px;
@@ -1735,6 +1801,10 @@
           left: 8px;
         }
         .card-watched-badge svg { width: 9px; height: 9px; }
+        .shelf { margin-bottom: 28px; }
+        .shelf-title { font-size: 17px; margin-bottom: 10px; }
+        .shelf-row { gap: 12px; padding-bottom: 10px; }
+        .shelf-row .card-slot { flex: 0 0 130px; }
         .magnet-row {
           flex-direction: column;
         }
@@ -1783,6 +1853,14 @@
 
       <main>
         <section class="view active" id="viewLibrary">
+          <div class="shelf" id="shelfContinue" hidden>
+            <h2 class="shelf-title">Continue Watching</h2>
+            <div class="shelf-row" id="shelfContinueRow"></div>
+          </div>
+          <div class="shelf" id="shelfRecent" hidden>
+            <h2 class="shelf-title">Recently Added</h2>
+            <div class="shelf-row" id="shelfRecentRow"></div>
+          </div>
           <div class="genre-bar" id="genreBar"></div>
           <div class="grid" id="grid"></div>
           <div class="empty" id="libraryEmpty" style="display: none">
@@ -2119,6 +2197,21 @@
       const closeModal = (el) => {
         el.classList.remove('active');
         if (el === playerModal) {
+          // Final resume-position flush so the next session resumes near
+          // the same second — the throttled timeupdate writer only fires
+          // every 5s, so a quick scrub-and-close could otherwise drop the
+          // last few seconds of state.
+          if (currentLocalVideo) {
+            const t = playerEl.currentTime;
+            const dur = playerEl.duration;
+            if (
+              Number.isFinite(t) && Number.isFinite(dur) && dur > 0 &&
+              t > 5 && t < dur * WATCHED_THRESHOLD &&
+              watchedAutoFiredFor !== currentLocalVideo
+            ) {
+              patchMeta(currentLocalVideo, { resumePosition: t });
+            }
+          }
           playerEl.pause();
           // Strip <track> elements + src so the next open starts clean
           playerEl.querySelectorAll('track').forEach((t) => t.remove());
@@ -2128,6 +2221,8 @@
           playerCC.classList.remove('active');
           closeSubMenu();
           subMenu.innerHTML = '';
+          currentLocalVideo = null;
+          watchedAutoFiredFor = null;
         }
         if (el === uploadModal) resetUploadModal();
       };
@@ -2706,9 +2801,13 @@
 
       // Auto-mark the current library file as watched the moment playback
       // reaches the end. No-op for torrents (currentLocalVideo is cleared
-      // in playTorrent).
+      // in playTorrent). The 95%-threshold handler in `timeupdate` usually
+      // fires first; guarded so we don't PATCH twice.
       playerEl.addEventListener('ended', () => {
-        if (currentLocalVideo) setWatched(currentLocalVideo, true);
+        if (!currentLocalVideo) return;
+        if (watchedAutoFiredFor === currentLocalVideo) return;
+        watchedAutoFiredFor = currentLocalVideo;
+        setWatched(currentLocalVideo, true);
       });
 
       editReprocess.addEventListener('click', async () => {
@@ -2964,8 +3063,75 @@
       // play a torrent (auto-mark only applies to library files).
       let currentLocalVideo = null;
 
+      // Generic partial-update helper for the metadata sidecar. Returns the
+      // server's response on success, null on failure — callers can stay
+      // fire-and-forget.
+      const patchMeta = async (videoName, body) => {
+        try {
+          const r = await fetch(`${API}/videos/${encodeURIComponent(videoName)}/metadata`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          return r.ok ? await r.json() : null;
+        } catch {
+          return null;
+        }
+      };
+
+      // Resume / auto-watched state. timeupdate fires ~4Hz so we throttle
+      // disk writes to once every RESUME_WRITE_INTERVAL_MS; a final flush
+      // happens when the player modal closes. watchedAutoFiredFor guards
+      // the 95% auto-mark so it only triggers once per playback session.
+      const RESUME_WRITE_INTERVAL_MS = 5000;
+      const WATCHED_THRESHOLD = 0.95;
+      let lastResumeWriteAt = 0;
+      let watchedAutoFiredFor = null;
+
+      playerEl.addEventListener('loadedmetadata', () => {
+        if (!currentLocalVideo) return;
+        const dur = playerEl.duration;
+        if (!Number.isFinite(dur) || dur <= 0) return;
+        const v = libraryCache.find((x) => x.name === currentLocalVideo) || {};
+        // First time we play a file we capture its true duration so the
+        // library grid can render progress bars without each card opening
+        // the file. Re-write if it's drifted by more than a second
+        // (e.g. after a re-process).
+        if (!v.duration || Math.abs(v.duration - dur) > 1) {
+          patchMeta(currentLocalVideo, { duration: dur });
+        }
+        const r = v.resumePosition;
+        if (typeof r === 'number' && r > 5 && r < dur * WATCHED_THRESHOLD) {
+          try { playerEl.currentTime = r; } catch {}
+        }
+      });
+
+      playerEl.addEventListener('timeupdate', () => {
+        if (!currentLocalVideo) return;
+        const t = playerEl.currentTime;
+        const dur = playerEl.duration;
+        if (!Number.isFinite(dur) || dur <= 0) return;
+        // 95% played → mark watched. The server clears resumePosition as
+        // part of the watched patch, so it disappears from the Continue
+        // Watching row immediately.
+        if (t >= dur * WATCHED_THRESHOLD && watchedAutoFiredFor !== currentLocalVideo) {
+          watchedAutoFiredFor = currentLocalVideo;
+          setWatched(currentLocalVideo, true);
+          return;
+        }
+        // Skip writes near the start (no useful resume) and tail (about to
+        // flip to watched anyway).
+        if (t < 5 || t > dur * WATCHED_THRESHOLD) return;
+        const now = Date.now();
+        if (now - lastResumeWriteAt < RESUME_WRITE_INTERVAL_MS) return;
+        lastResumeWriteAt = now;
+        patchMeta(currentLocalVideo, { resumePosition: t });
+      });
+
       const playLocalVideo = async (filename) => {
         currentLocalVideo = filename;
+        watchedAutoFiredFor = null;
+        lastResumeWriteAt = 0;
         playerEl.src = `${API}/stream/${encodeURIComponent(filename)}`;
         playerTitleEl.textContent = cleanName(filename);
         openModal(playerModal);
@@ -3020,10 +3186,27 @@
         const watchedBadge = video.watched
           ? `<div class="card-watched-badge"><svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>Watched</div>`
           : '';
+        // Resume progress bar: only when we have both a position and a
+        // duration, the position is past the start grace window, and the
+        // film hasn't been marked watched (watched implies cleared, but
+        // belt-and-braces against stale metadata).
+        const hasResume =
+          !video.watched &&
+          typeof video.resumePosition === 'number' &&
+          typeof video.duration === 'number' &&
+          video.duration > 0 &&
+          video.resumePosition > 5;
+        const progressHtml = hasResume
+          ? `<div class="card-progress"><div class="card-progress-fill" style="width:${Math.min(
+              100,
+              (video.resumePosition / video.duration) * 100
+            ).toFixed(1)}%"></div></div>`
+          : '';
         card.innerHTML = `
           <div class="card-media">
             ${posterHtml}
             ${watchedBadge}
+            ${progressHtml}
             <div class="card-play">
               <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
             </div>
@@ -3153,6 +3336,59 @@
         });
       };
 
+      // Hard cap on shelf items — past this point the row scrolls forever
+      // and the main grid below already covers discovery. 12 fits a couple
+      // of viewport widths on desktop.
+      const SHELF_LIMIT = 12;
+      // Below this library size the "Recently Added" row is just a
+      // duplicate of the main grid (which is already sorted by modified
+      // time), so we hide it.
+      const RECENT_SHELF_MIN_LIBRARY = 8;
+
+      const shelfContinueEl = document.getElementById('shelfContinue');
+      const shelfContinueRowEl = document.getElementById('shelfContinueRow');
+      const shelfRecentEl = document.getElementById('shelfRecent');
+      const shelfRecentRowEl = document.getElementById('shelfRecentRow');
+
+      const renderShelfRow = (sectionEl, rowEl, items) => {
+        rowEl.innerHTML = '';
+        if (!items.length) {
+          sectionEl.hidden = true;
+          return;
+        }
+        sectionEl.hidden = false;
+        items.forEach((v) => rowEl.appendChild(renderCard(v)));
+      };
+
+      const renderShelves = (videos) => {
+        const cw = videos
+          .filter(
+            (v) =>
+              !v.watched &&
+              typeof v.resumePosition === 'number' &&
+              typeof v.duration === 'number' &&
+              v.duration > 0 &&
+              v.resumePosition > 5 &&
+              v.resumePosition < v.duration * 0.95
+          )
+          .sort((a, b) => (b.lastPlayedAt || '').localeCompare(a.lastPlayedAt || ''))
+          .slice(0, SHELF_LIMIT);
+
+        // Don't repeat Continue Watching items in Recently Added — same
+        // poster twice in a row reads as a glitch.
+        const cwNames = new Set(cw.map((v) => v.name));
+        const recent =
+          videos.length >= RECENT_SHELF_MIN_LIBRARY
+            ? videos
+                .filter((v) => !cwNames.has(v.name))
+                .sort((a, b) => (b.modified || '').localeCompare(a.modified || ''))
+                .slice(0, SHELF_LIMIT)
+            : [];
+
+        renderShelfRow(shelfContinueEl, shelfContinueRowEl, cw);
+        renderShelfRow(shelfRecentEl, shelfRecentRowEl, recent);
+      };
+
       const renderLibrary = () => {
         const matches = selectedGenres.size === 0
           ? libraryCache
@@ -3163,8 +3399,11 @@
         if (!libraryCache.length) {
           libraryEmpty.style.display = 'flex';
           gridEl.style.display = 'none';
+          shelfContinueEl.hidden = true;
+          shelfRecentEl.hidden = true;
           return;
         }
+        renderShelves(matches);
         libraryEmpty.style.display = 'none';
         gridEl.style.display = 'grid';
         if (!matches.length) {

@@ -291,23 +291,20 @@ Aesthetic principles:
 ## Known gaps / future work
 
 - **Custom Netflix-style player** — still on the stock `<video controls>`
-  chrome. Next session's main item: bigger scrub bar, custom
-  subtitle/audio menus, keyboard shortcuts, mobile gestures, persistent
-  resume position (the `resumePosition` field is already supported by
-  the metadata sidecar, just not written yet).
+  chrome. Next on the polish list: bigger scrub bar, custom
+  subtitle/audio menus, keyboard shortcuts (space, ←/→, ↑/↓, F, M, C,
+  J/L), mobile gestures, hover-scrub thumbnails (ffmpeg sprite-sheet
+  sidecar), PiP button.
 - TMDB-derived genre data is only populated when the user picks a
   poster (or via `/tmdb/save-metadata` backfill). Consider auto-running
   the lookup on first library load for any video that has no `tmdbId`
   but a confident filename match.
 - README is still stale vs the actual feature set — worth a refresh.
-- Overview / cast / director from TMDB still aren't stored; would feed
-  into a richer detail view if/when one exists.
-- The auto-mark-watched fires on the `ended` event only. If the user
-  quits 30 seconds early it stays "unwatched" — a 95%-played heuristic
-  on `timeupdate` would be more forgiving.
+- Overview / cast / director / backdrop / trailer key from TMDB still
+  aren't stored; needed before a Netflix-style detail modal can land.
 
 ---
 
-*Last updated: 2026-05-26 — Session 1 wrap-up: torrent pause/resume +
-ETA, watched indicator + metadata sidecar, TMDB genre persistence +
-pill filter, larger cards + mobile grid all landed.*
+*Last updated: 2026-05-27 — Session 2: persistent resume position +
+Continue Watching row, 95%-played auto-watched, Recently Added row,
+on-card progress bars.*
