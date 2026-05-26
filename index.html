@@ -849,6 +849,137 @@
         color: var(--gold);
       }
 
+      .edit-section {
+        margin-top: 22px;
+      }
+      .edit-section:first-of-type {
+        margin-top: 8px;
+      }
+      .edit-label {
+        font-family: 'DM Sans', sans-serif;
+        font-size: 9px;
+        letter-spacing: 0.3em;
+        text-transform: uppercase;
+        color: var(--text-faint);
+        margin-bottom: 8px;
+      }
+      .edit-name-row {
+        display: flex;
+        gap: 10px;
+      }
+      .edit-name-input {
+        flex: 1;
+        background: var(--surface);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 2px;
+        color: var(--text);
+        font-family: 'DM Sans', sans-serif;
+        font-size: 13px;
+        padding: 9px 12px;
+        outline: none;
+        transition: border-color 0.2s ease;
+      }
+      .edit-name-input:focus {
+        border-color: var(--gold);
+      }
+      .edit-poster-row {
+        display: flex;
+        gap: 14px;
+        align-items: stretch;
+      }
+      .edit-poster-preview {
+        width: 80px;
+        height: 120px;
+        background: var(--surface);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 2px;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+      .edit-poster-preview img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      .edit-poster-empty {
+        font-family: 'DM Sans', sans-serif;
+        font-size: 10px;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: var(--text-faint);
+      }
+      .edit-poster-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        justify-content: center;
+        flex: 1;
+      }
+      .edit-sub-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 10px;
+      }
+      .edit-sub-list:empty {
+        display: none;
+      }
+      .edit-sub-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px;
+        background: var(--surface);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: 2px;
+      }
+      .edit-sub-row-name {
+        flex: 1;
+        font-family: 'DM Sans', sans-serif;
+        font-size: 12px;
+        color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .edit-sub-row-lang {
+        font-family: 'DM Sans', sans-serif;
+        font-size: 10px;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: var(--gold-soft);
+      }
+      .edit-sub-row-remove {
+        background: transparent;
+        border: none;
+        color: var(--text-faint);
+        cursor: pointer;
+        font-size: 16px;
+        padding: 0 4px;
+        transition: color 0.2s ease;
+      }
+      .edit-sub-row-remove:hover {
+        color: #d97757;
+      }
+      .edit-sub-add {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+      .edit-sub-lang {
+        background: var(--surface);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 2px;
+        color: var(--text);
+        font-family: 'DM Sans', sans-serif;
+        font-size: 12px;
+        padding: 8px 10px;
+        outline: none;
+      }
+
       .sub-clear {
         background: transparent;
         border: none;
@@ -1464,6 +1595,47 @@
       </div>
     </div>
 
+    <!-- Edit modal (per-card) -->
+    <div class="modal" id="editModal">
+      <div class="modal-content" style="width: 600px;">
+        <button class="modal-close" data-close="editModal">×</button>
+        <h2 class="modal-title">Edit</h2>
+        <p class="modal-sub" id="editModalSub">—</p>
+
+        <div class="edit-section">
+          <div class="edit-label">Name</div>
+          <div class="edit-name-row">
+            <input type="text" class="edit-name-input" id="editName" spellcheck="false" autocomplete="off"/>
+            <button class="sub-pick" id="editNameSave" type="button">Save</button>
+          </div>
+        </div>
+
+        <div class="edit-section">
+          <div class="edit-label">Poster</div>
+          <div class="edit-poster-row">
+            <div class="edit-poster-preview" id="editPosterPreview">
+              <span class="edit-poster-empty">None</span>
+            </div>
+            <div class="edit-poster-actions">
+              <button class="sub-pick" id="editPosterTmdb" type="button">Search TMDB</button>
+              <button class="sub-pick" id="editPosterUpload" type="button">Upload</button>
+              <button class="sub-pick" id="editPosterRemove" type="button">Remove</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="edit-section">
+          <div class="edit-label">Subtitles</div>
+          <div class="edit-sub-list" id="editSubList"></div>
+          <div class="edit-sub-add">
+            <input type="file" id="editSubInput" accept=".srt,.vtt" style="display:none"/>
+            <select class="edit-sub-lang" id="editSubLang"></select>
+            <button class="sub-pick" id="editSubPick" type="button">+ Add subtitle file</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Player modal -->
     <div class="modal player-modal" id="playerModal">
       <div class="player-wrap">
@@ -1520,6 +1692,18 @@
       const posterCommit = document.getElementById('posterCommit');
       const uploadActions = document.getElementById('uploadActions');
       const commitUploadBtn = document.getElementById('commitUpload');
+      const editModal = document.getElementById('editModal');
+      const editModalSub = document.getElementById('editModalSub');
+      const editName = document.getElementById('editName');
+      const editNameSave = document.getElementById('editNameSave');
+      const editPosterPreview = document.getElementById('editPosterPreview');
+      const editPosterTmdb = document.getElementById('editPosterTmdb');
+      const editPosterUpload = document.getElementById('editPosterUpload');
+      const editPosterRemove = document.getElementById('editPosterRemove');
+      const editSubList = document.getElementById('editSubList');
+      const editSubInput = document.getElementById('editSubInput');
+      const editSubLang = document.getElementById('editSubLang');
+      const editSubPick = document.getElementById('editSubPick');
       const progressEl = document.getElementById('progress');
       const progressFill = document.getElementById('progressFill');
       const progressName = document.getElementById('progressName');
@@ -1618,7 +1802,7 @@
         });
       });
 
-      [uploadModal, playerModal, posterModal].forEach((modal) => {
+      [uploadModal, playerModal, posterModal, editModal].forEach((modal) => {
         modal.addEventListener('click', (e) => {
           if (e.target === modal) closeModal(modal);
         });
@@ -1628,6 +1812,7 @@
         if (e.key === 'Escape') {
           if (playerModal.classList.contains('active')) closeModal(playerModal);
           else if (posterModal.classList.contains('active')) closeModal(posterModal);
+          else if (editModal.classList.contains('active')) closeModal(editModal);
           else if (uploadModal.classList.contains('active')) closeModal(uploadModal);
         }
       });
@@ -1987,6 +2172,11 @@
           try {
             await fetchTmdbPoster(posterTmdbSelected.posterPath, posterEditorMode.videoName);
             closeModal(posterModal);
+            // If the TMDB picker was opened from the per-card edit modal,
+            // refresh its poster preview so the change shows without reopen.
+            if (editing && editing.videoName === posterEditorMode.videoName) {
+              await refreshEditPoster();
+            }
             loadVideos();
           } catch (err) {
             alert(err.message);
@@ -2005,37 +2195,131 @@
         }
       });
 
-      // ---- Poster editor (existing card)
-      const openPosterEditor = async (videoName) => {
-        const choice = await pickPosterAction();
-        if (!choice) return;
-        if (choice === 'upload') {
-          uploadPosterFromDisk(videoName);
-        } else if (choice === 'tmdb') {
-          posterEditorMode = { videoName };
-          openTmdbPicker(videoName);
-        } else if (choice === 'remove') {
-          if (!confirm('Remove the current poster?')) return;
-          await deletePoster(videoName);
-          loadVideos();
+      // ---- Edit modal (per-card: rename, poster, subtitles)
+      // editing.videoName is the canonical filename on disk; updates to
+      // poster/subtitle endpoints all key off it. After a rename we update
+      // editing.videoName so subsequent actions target the new file.
+      let editing = null;
+
+      const populateEditSubLang = () => {
+        if (editSubLang.options.length) return;
+        SUB_LANG_OPTIONS.forEach(([code, label]) => {
+          const opt = document.createElement('option');
+          opt.value = code;
+          opt.textContent = label;
+          editSubLang.appendChild(opt);
+        });
+      };
+
+      const fetchSubtitlesForVideo = async (videoName) => {
+        try {
+          const r = await fetch(`${API}/subtitles/${encodeURIComponent(videoName)}`);
+          return r.ok ? await r.json() : [];
+        } catch {
+          return [];
         }
       };
 
-      // Minimal native-prompt picker — keeps the surface area small. Returns 'upload' | 'tmdb' | 'remove' | null.
-      const pickPosterAction = async () => {
-        const tmdbOk = await ensureTmdbStatus();
-        const options = tmdbOk
-          ? '1) Upload from file\n2) Search TMDB\n3) Remove current poster'
-          : '1) Upload from file\n3) Remove current poster\n\n(TMDB lookup disabled — add TMDB_API_KEY to .env)';
-        const choice = prompt(`Poster options:\n\n${options}\n\nEnter 1, 2, or 3:`);
-        if (!choice) return null;
-        if (choice.trim() === '1') return 'upload';
-        if (choice.trim() === '2' && tmdbOk) return 'tmdb';
-        if (choice.trim() === '3') return 'remove';
-        return null;
+      const renderEditPoster = (videoName, posterUrl) => {
+        if (posterUrl) {
+          editPosterPreview.innerHTML = `<img src="${API}${posterUrl}?t=${Date.now()}" alt=""/>`;
+          editPosterRemove.style.display = '';
+        } else {
+          editPosterPreview.innerHTML = '<span class="edit-poster-empty">None</span>';
+          editPosterRemove.style.display = 'none';
+        }
       };
 
-      const uploadPosterFromDisk = (videoName) => {
+      const renderEditSubList = (subs) => {
+        editSubList.innerHTML = '';
+        subs.forEach((s) => {
+          const row = document.createElement('div');
+          row.className = 'edit-sub-row';
+          row.innerHTML = `
+            <span class="edit-sub-row-name"></span>
+            <span class="edit-sub-row-lang"></span>
+            <button class="edit-sub-row-remove" type="button" title="Delete subtitle">×</button>
+          `;
+          row.querySelector('.edit-sub-row-name').textContent = s.name;
+          row.querySelector('.edit-sub-row-lang').textContent = s.label || (s.lang || '').toUpperCase();
+          row.querySelector('.edit-sub-row-remove').addEventListener('click', async () => {
+            if (!confirm(`Delete subtitle "${s.name}"?`)) return;
+            try {
+              const r = await fetch(
+                `${API}/subtitles/${encodeURIComponent(editing.videoName)}/${encodeURIComponent(s.name)}`,
+                { method: 'DELETE' }
+              );
+              if (!r.ok) throw new Error('Delete failed');
+              await refreshEditSubList();
+            } catch (err) {
+              alert(err.message);
+            }
+          });
+          editSubList.appendChild(row);
+        });
+      };
+
+      const refreshEditSubList = async () => {
+        const subs = await fetchSubtitlesForVideo(editing.videoName);
+        renderEditSubList(subs);
+      };
+
+      const refreshEditPoster = async () => {
+        // /videos returns the canonical poster URL, including a fresh
+        // mtime-based query string. Re-fetch instead of guessing.
+        try {
+          const r = await fetch(`${API}/videos`);
+          if (!r.ok) return;
+          const list = await r.json();
+          const v = list.find((x) => x.name === editing.videoName);
+          renderEditPoster(editing.videoName, v && v.poster);
+        } catch {}
+      };
+
+      const openEditModal = async (videoName) => {
+        populateEditSubLang();
+        editing = { videoName };
+        editModalSub.textContent = cleanName(videoName);
+        editName.value = cleanName(videoName);
+        editSubLang.value = 'en';
+        // Find this video in the most recent /videos response for the poster.
+        const r = await fetch(`${API}/videos`).catch(() => null);
+        const list = r && r.ok ? await r.json() : [];
+        const v = list.find((x) => x.name === videoName) || {};
+        renderEditPoster(videoName, v.poster);
+        const subs = await fetchSubtitlesForVideo(videoName);
+        renderEditSubList(subs);
+        openModal(editModal);
+      };
+
+      editNameSave.addEventListener('click', async () => {
+        if (!editing) return;
+        const newName = editName.value.trim();
+        if (!newName || newName === cleanName(editing.videoName)) return;
+        editNameSave.disabled = true;
+        try {
+          const r = await fetch(`${API}/videos/${encodeURIComponent(editing.videoName)}/rename`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ newName }),
+          });
+          const body = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(body.error || 'Rename failed');
+          editing.videoName = body.name;
+          editModalSub.textContent = cleanName(body.name);
+          editName.value = cleanName(body.name);
+          // Sidecars (poster + subs) were renamed too — refresh both panels.
+          await Promise.all([refreshEditPoster(), refreshEditSubList()]);
+          loadVideos();
+        } catch (err) {
+          alert(err.message);
+        } finally {
+          editNameSave.disabled = false;
+        }
+      });
+
+      editPosterUpload.addEventListener('click', () => {
+        if (!editing) return;
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = 'image/jpeg,image/png,image/webp';
@@ -2043,14 +2327,55 @@
           const file = input.files && input.files[0];
           if (!file) return;
           try {
-            await uploadPosterFile(file, videoName);
+            await uploadPosterFile(file, editing.videoName);
+            await refreshEditPoster();
             loadVideos();
           } catch (err) {
             alert(err.message);
           }
         });
         input.click();
-      };
+      });
+
+      editPosterTmdb.addEventListener('click', () => {
+        if (!editing) return;
+        // openTmdbPicker reads posterEditorMode to know it's editing an
+        // existing card vs. staging a fresh upload. We keep editModal open
+        // underneath; on success it refreshes via posterEditorMode flow.
+        posterEditorMode = { videoName: editing.videoName };
+        openTmdbPicker(editing.videoName);
+      });
+
+      editPosterRemove.addEventListener('click', async () => {
+        if (!editing) return;
+        if (!confirm('Remove the current poster?')) return;
+        try {
+          await deletePoster(editing.videoName);
+          await refreshEditPoster();
+          loadVideos();
+        } catch (err) {
+          alert(err.message);
+        }
+      });
+
+      editSubPick.addEventListener('click', () => editSubInput.click());
+      editSubInput.addEventListener('change', async () => {
+        if (!editing) return;
+        const file = editSubInput.files && editSubInput.files[0];
+        if (!file) return;
+        // Prefer a language tag inferred from the filename if it matches
+        // a known option; otherwise use the selected dropdown value.
+        const inferred = inferLangFromFilename(file.name);
+        const lang = inferred !== 'en' ? inferred : editSubLang.value;
+        try {
+          await uploadSubtitle(file, editing.videoName, lang);
+          await refreshEditSubList();
+        } catch (err) {
+          alert(err.message);
+        } finally {
+          editSubInput.value = '';
+        }
+      });
 
       // ---- Hover preview (Netflix-style)
       const HOVER_DELAY_MS = 600;
@@ -2242,7 +2567,7 @@
               <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
             </div>
           </div>
-          <button class="card-edit" title="Edit poster">
+          <button class="card-edit" title="Edit">
             <svg viewBox="0 0 24 24" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
               <rect x="3" y="4" width="18" height="14" rx="2"/>
               <circle cx="9" cy="10" r="1.6"/>
@@ -2270,7 +2595,7 @@
         });
         card.querySelector('.card-edit').addEventListener('click', (e) => {
           e.stopPropagation();
-          openPosterEditor(video.name);
+          openEditModal(video.name);
         });
         attachHoverPreview(card, video, streamUrl);
         attachAnchorOnHover(card, slot);

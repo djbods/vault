@@ -209,16 +209,20 @@ app.post('/upload', upload.single('file'), async (req, res) => {
   try {
     const targetBase = sanitize(baseNameNoExt(req.file.filename)) || `upload-${Date.now()}`;
     const outPath = await prepareForLibrary(stagedPath, VIDEOS_DIR, targetBase);
+    // Pull embedded subtitle tracks out of the source container before we
+    // delete the staged file. prepareForLibrary only copies video+audio,
+    // so the source is the only place those streams still exist.
+    const subtitles = await extractEmbeddedSubtitles(stagedPath, VIDEOS_DIR, targetBase);
     const stat = fs.statSync(outPath);
     res.json({
       name: path.basename(outPath),
       size: stat.size,
       mimetype: 'video/mp4',
+      subtitles,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   } finally {
-    // Always clean up the staged upload, success or failure.
     fs.unlink(stagedPath, () => {});
   }
 });
@@ -350,6 +354,131 @@ const prepareForLibrary = async (srcPath, targetDir, targetBase) => {
   });
 };
 
+// Text-based subtitle codecs that ffmpeg can convert to WebVTT in one pass.
+// Bitmap codecs (hdmv_pgs_subtitle, dvd_subtitle, dvb_subtitle, xsub) would
+// need OCR — we skip them rather than ship a corrupt VTT.
+const TEXT_SUBTITLE_CODECS = new Set([
+  'subrip', 'srt', 'ass', 'ssa', 'mov_text', 'webvtt', 'text',
+]);
+
+// ISO 639-2 → 639-1 for the common cases the player UI has labels for.
+// Anything not in the map passes through unchanged (the UI uppercases it).
+const LANG_3TO2 = {
+  eng: 'en', spa: 'es', fre: 'fr', fra: 'fr', ger: 'de', deu: 'de',
+  ita: 'it', por: 'pt', dut: 'nl', nld: 'nl', swe: 'sv', nor: 'no',
+  dan: 'da', fin: 'fi', rus: 'ru', pol: 'pl', jpn: 'ja', kor: 'ko',
+  chi: 'zh', zho: 'zh', ara: 'ar', hin: 'hi', tur: 'tr', vie: 'vi',
+  tha: 'th', ind: 'id', heb: 'he', cze: 'cs', ces: 'cs', gre: 'el',
+  ell: 'el', hun: 'hu', rum: 'ro', ron: 'ro', ukr: 'uk',
+};
+const normalizeLang = (raw) => {
+  const m = String(raw || '').toLowerCase().match(/^[a-z]{2,3}$/);
+  if (!m) return 'en';
+  const v = m[0];
+  if (v.length === 2) return v;
+  return LANG_3TO2[v] || v;
+};
+
+// ffprobe → list of subtitle streams with their codec + language tag.
+// Returns [{ index, codec, lang }] where index is the stream's position in
+// the subtitle-only stream list (so it can be paired with `-map 0:s:N`).
+const probeSubtitleStreams = (filepath) =>
+  new Promise((resolve, reject) => {
+    const ff = spawn('ffprobe', [
+      '-v', 'error',
+      '-select_streams', 's',
+      '-show_entries', 'stream=index,codec_name:stream_tags=language,title',
+      '-of', 'json',
+      filepath,
+    ]);
+    let out = '';
+    let err = '';
+    ff.stdout.on('data', (d) => (out += d.toString()));
+    ff.stderr.on('data', (d) => (err += d.toString()));
+    ff.on('error', reject);
+    ff.on('close', (code) => {
+      if (code !== 0) return reject(new Error(`ffprobe exit ${code}: ${err.trim()}`));
+      try {
+        const streams = (JSON.parse(out).streams || []).map((s, i) => ({
+          index: i,
+          codec: (s.codec_name || '').toLowerCase(),
+          lang: normalizeLang((s.tags && s.tags.language) || ''),
+        }));
+        resolve(streams);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
+
+// Run ffmpeg once to extract a single subtitle stream into a VTT file.
+const extractOneSubtitle = (srcPath, streamIndex, outPath) =>
+  new Promise((resolve, reject) => {
+    const ff = spawn('ffmpeg', [
+      '-hide_banner',
+      '-loglevel', 'error',
+      '-i', srcPath,
+      '-map', `0:s:${streamIndex}`,
+      '-c:s', 'webvtt',
+      '-y',
+      outPath,
+    ]);
+    let stderr = '';
+    ff.stderr.on('data', (d) => (stderr += d.toString()));
+    ff.on('error', reject);
+    ff.on('close', (code) => {
+      if (code !== 0) {
+        try { fs.unlinkSync(outPath); } catch {}
+        return reject(new Error(`ffmpeg subtitle exit ${code}: ${stderr.trim().slice(0, 300)}`));
+      }
+      resolve(outPath);
+    });
+  });
+
+// Pull all text-based subtitle streams out of `srcPath` and write them
+// next to the library file as `<base>.<lang>.vtt`. Duplicate languages
+// get numeric suffixes (`.en.vtt`, `.en2.vtt`). Existing sidecar files
+// are preserved — we never overwrite a manual upload or torrent-sibling
+// subtitle. Best-effort: failures on individual streams log and skip.
+const extractEmbeddedSubtitles = async (srcPath, targetDir, targetBase) => {
+  let streams = [];
+  try {
+    streams = await probeSubtitleStreams(srcPath);
+  } catch (e) {
+    console.warn(`[subs] probe failed for ${path.basename(srcPath)}: ${e.message}`);
+    return [];
+  }
+  const written = [];
+  const usedNames = new Set();
+  for (const s of streams) {
+    if (!TEXT_SUBTITLE_CODECS.has(s.codec)) {
+      console.log(`[subs] skip stream ${s.index} (${s.codec}) — not text-based`);
+      continue;
+    }
+    // Find a non-colliding filename for this language.
+    let suffix = '';
+    let n = 1;
+    let targetName;
+    while (true) {
+      targetName = `${targetBase}.${s.lang}${suffix}.vtt`;
+      const exists = fs.existsSync(path.join(targetDir, targetName)) || usedNames.has(targetName);
+      if (!exists) break;
+      n += 1;
+      suffix = String(n);
+    }
+    const targetPath = path.join(targetDir, targetName);
+    try {
+      await extractOneSubtitle(srcPath, s.index, targetPath);
+      usedNames.add(targetName);
+      written.push(targetName);
+      console.log(`[subs] extracted ${s.lang} (${s.codec}) → ${targetName}`);
+    } catch (e) {
+      console.warn(`[subs] extract failed for stream ${s.index}: ${e.message}`);
+    }
+  }
+  return written;
+};
+
 app.get('/stream/:filename', (req, res) => {
   const filepath = resolveSafe(req.params.filename);
   if (!filepath || !fs.existsSync(filepath)) {
@@ -390,6 +519,61 @@ app.get('/stream/:filename', (req, res) => {
     });
     fs.createReadStream(filepath).pipe(res);
   }
+});
+
+// Rename a library video plus all its sidecars (poster, subtitle files).
+// Body: { newName } — extension is preserved from the existing file, so
+// callers send the desired display name without an extension.
+app.post('/videos/:filename/rename', (req, res) => {
+  const filepath = resolveSafe(req.params.filename);
+  if (!filepath || !fs.existsSync(filepath)) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  const requested = String((req.body && req.body.newName) || '').trim();
+  if (!requested) return res.status(400).json({ error: 'newName required' });
+
+  const oldBase = baseNameNoExt(path.basename(filepath));
+  const oldExt = path.extname(filepath);
+  const cleanedBase = sanitize(baseNameNoExt(requested));
+  if (!cleanedBase || cleanedBase.includes('/') || cleanedBase.includes('..')) {
+    return res.status(400).json({ error: 'Invalid name' });
+  }
+  if (cleanedBase === oldBase) {
+    return res.json({ name: path.basename(filepath), renamed: [] });
+  }
+
+  const newVideoName = `${cleanedBase}${oldExt}`;
+  const newVideoPath = resolveSafe(newVideoName);
+  if (!newVideoPath) return res.status(400).json({ error: 'Invalid path' });
+  if (fs.existsSync(newVideoPath)) {
+    return res.status(409).json({ error: 'A file with that name already exists' });
+  }
+
+  try {
+    fs.renameSync(filepath, newVideoPath);
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+
+  // Rename all sidecars (posters + subtitles) that share the old base.
+  const renamed = [path.basename(newVideoPath)];
+  const entries = fs.readdirSync(VIDEOS_DIR);
+  for (const n of entries) {
+    if (!n.startsWith(oldBase + '.')) continue;
+    const ext = path.extname(n).toLowerCase();
+    const isSidecar = SUBTITLE_EXTS.has(ext) || isPosterFile(n);
+    if (!isSidecar) continue;
+    const newName = cleanedBase + n.slice(oldBase.length);
+    const fromPath = resolveSafe(n);
+    const toPath = resolveSafe(newName);
+    if (!fromPath || !toPath || fs.existsSync(toPath)) continue;
+    try {
+      fs.renameSync(fromPath, toPath);
+      renamed.push(newName);
+    } catch {}
+  }
+
+  res.json({ name: path.basename(newVideoPath), renamed });
 });
 
 app.delete('/videos/:filename', (req, res) => {
@@ -475,6 +659,31 @@ app.get('/subtitles/:filename', (req, res) => {
         };
       });
     res.json(subs);
+  });
+});
+
+// Delete one sidecar subtitle file. The :subName must share the video's
+// base name to guard against deleting unrelated files via path tricks.
+app.delete('/subtitles/:videoName/:subName', (req, res) => {
+  const videoPath = resolveSafe(req.params.videoName);
+  if (!videoPath || !fs.existsSync(videoPath)) {
+    return res.status(404).json({ error: 'Video not found' });
+  }
+  const subPath = resolveSafe(req.params.subName);
+  if (!subPath || !fs.existsSync(subPath)) {
+    return res.status(404).json({ error: 'Subtitle not found' });
+  }
+  const subBase = path.basename(subPath);
+  if (!SUBTITLE_EXTS.has(path.extname(subBase).toLowerCase())) {
+    return res.status(400).json({ error: 'Not a subtitle file' });
+  }
+  const videoBase = baseNameNoExt(path.basename(videoPath));
+  if (!subBase.startsWith(videoBase + '.')) {
+    return res.status(400).json({ error: 'Subtitle does not belong to this video' });
+  }
+  fs.unlink(subPath, (err) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ deleted: subBase });
   });
 });
 
@@ -868,7 +1077,8 @@ app.post('/torrent/:infoHash/save-to-library', async (req, res) => {
     // stream-copied. HEVC gets the hvc1 tag.
     const videoDest = await prepareForLibrary(sourcePath, VIDEOS_DIR, cleanedBase);
 
-    // Copy subtitles, converting SRT → VTT, suffixed with detected language tag
+    // Copy sibling .srt/.vtt files first, converting SRT → VTT and tagging
+    // with the language detected from the filename.
     const videoBase = baseNameNoExt(path.basename(videoDest));
     const writtenSubs = [];
     for (const idx of state.subtitleIndices) {
@@ -889,6 +1099,12 @@ app.post('/torrent/:infoHash/save-to-library', async (req, res) => {
       fs.writeFileSync(targetPath, out);
       writtenSubs.push(targetName);
     }
+
+    // Then pull any embedded subtitle tracks from the source container.
+    // Sibling files (above) win on language collisions because they're
+    // already on disk by the time extractEmbeddedSubtitles checks.
+    const embedded = await extractEmbeddedSubtitles(sourcePath, VIDEOS_DIR, videoBase);
+    writtenSubs.push(...embedded);
 
     // Remove the torrent + wipe its on-disk store
     try {
