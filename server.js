@@ -165,9 +165,20 @@ const detectTorrentFiles = (torrent) => {
 const torrentStatus = (torrent) => {
   const hasMetadata = torrent.files && torrent.files.length > 0;
   if (!hasMetadata) return 'connecting';
+  if (torrent.paused) return 'paused';
   if (torrent.progress >= 1) return 'seeding';
   if (torrent.downloadSpeed > 0) return 'downloading';
   return 'stalled';
+};
+
+// WebTorrent's `timeRemaining` is in ms and goes to Infinity when speed is
+// zero (paused or stalled). Normalise to seconds, returning null when the
+// client should render a placeholder rather than a giant number.
+const torrentEtaSeconds = (torrent) => {
+  if (torrent.paused || torrent.progress >= 1) return null;
+  const ms = torrent.timeRemaining;
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  return Math.round(ms / 1000);
 };
 
 const serializeTorrent = (state) => {
@@ -181,6 +192,10 @@ const serializeTorrent = (state) => {
     numPeers: torrent.numPeers,
     status: torrentStatus(torrent),
     ready: torrent.ready,
+    paused: Boolean(torrent.paused),
+    downloaded: torrent.downloaded || 0,
+    length: torrent.length || 0,
+    etaSeconds: torrentEtaSeconds(torrent),
     mainVideo: mainFile ? { name: mainFile.name, length: mainFile.length } : null,
     subtitles: subtitleIndices.map((i) => {
       const f = torrent.files[i];
@@ -1210,6 +1225,33 @@ app.post('/torrent/:infoHash/save-to-library', async (req, res) => {
   } catch (err) {
     const state = torrentState.get(req.params.infoHash);
     if (state) state.savingToLibrary = false;
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/torrent/:infoHash/pause', async (req, res) => {
+  try {
+    await webtorrentReady;
+    const state = torrentState.get(req.params.infoHash);
+    if (!state) return res.status(404).json({ error: 'Not found' });
+    if (state.torrent.progress >= 1) {
+      return res.status(400).json({ error: 'Torrent is complete' });
+    }
+    state.torrent.pause();
+    res.json(serializeTorrent(state));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/torrent/:infoHash/resume', async (req, res) => {
+  try {
+    await webtorrentReady;
+    const state = torrentState.get(req.params.infoHash);
+    if (!state) return res.status(404).json({ error: 'Not found' });
+    state.torrent.resume();
+    res.json(serializeTorrent(state));
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
