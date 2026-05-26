@@ -489,6 +489,11 @@
         border-color: rgba(231, 194, 128, 0.32);
         background: rgba(231, 194, 128, 0.06);
       }
+      .t-badge[data-status='paused'] {
+        color: var(--text-dim);
+        border-color: rgba(255, 255, 255, 0.1);
+        background: rgba(255, 255, 255, 0.03);
+      }
 
       @keyframes pulse {
         0%, 100% { opacity: 0.5; }
@@ -552,6 +557,36 @@
 
       .t-watch:disabled {
         opacity: 0.3;
+        cursor: not-allowed;
+        pointer-events: none;
+      }
+
+      /* Pause / Resume — matches t-watch dimensions but with a quieter
+         neutral border so it doesn't compete with the primary Watch CTA. */
+      .t-pause {
+        font-family: 'DM Sans', sans-serif;
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 0.3em;
+        text-transform: uppercase;
+        padding: 11px 18px;
+        background: transparent;
+        color: var(--text-dim);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 2px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        align-self: flex-start;
+      }
+
+      .t-pause:hover {
+        color: var(--text);
+        border-color: rgba(255, 255, 255, 0.2);
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .t-pause:disabled {
+        opacity: 0.4;
         cursor: not-allowed;
         pointer-events: none;
       }
@@ -1784,6 +1819,18 @@
         return `${(bps / (1024 * 1024)).toFixed(2)} MB/s`;
       };
 
+      // Render a torrent ETA in compact form: "—" when unknown,
+      // "Ns" / "M:SS" / "H:MM:SS" otherwise.
+      const formatEta = (seconds) => {
+        if (seconds == null || !Number.isFinite(seconds) || seconds <= 0) return '—';
+        if (seconds < 60) return `${seconds}s`;
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = seconds % 60;
+        if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        return `${m}:${String(s).padStart(2, '0')}`;
+      };
+
       const cleanName = (filename) => {
         const noExt = filename.replace(/\.[^.]+$/, '');
         return noExt.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -2756,12 +2803,22 @@
         const pct = Math.round((t.progress || 0) * 100);
         const canWatch = (t.progress || 0) > 0.02 && t.mainVideo;
         const canSave = (t.progress || 0) >= 1 && t.mainVideo;
+        const isComplete = (t.progress || 0) >= 1;
+        const isPaused = Boolean(t.paused);
+        // Pause/Resume only makes sense while still downloading; once a
+        // torrent is at 100% it's just seeding and the action becomes a no-op.
+        const showPauseToggle = !isComplete;
         const statusText = {
           connecting: 'Connecting',
           downloading: 'Downloading',
           stalled: 'Stalled',
           seeding: 'Seeding',
+          paused: 'Paused',
         }[t.status] || t.status;
+
+        // Show the ETA stat only while we're actually downloading — paused
+        // and stalled torrents would just render "—".
+        const showEta = !isComplete && !isPaused && t.etaSeconds != null;
 
         card.innerHTML = `
           <div class="t-head">
@@ -2781,9 +2838,11 @@
             <div><span class="t-stat-label">DL</span>${formatSpeed(t.downloadSpeed)}</div>
             <div><span class="t-stat-label">Peers</span>${t.numPeers || 0}</div>
             ${t.mainVideo ? `<div><span class="t-stat-label">Size</span>${formatSize(t.mainVideo.length)}</div>` : ''}
+            ${showEta ? `<div><span class="t-stat-label">ETA</span>${formatEta(t.etaSeconds)}</div>` : ''}
           </div>
           <div class="t-actions">
             <button class="t-watch" ${canWatch ? '' : 'disabled'}>${canWatch ? 'Watch' : 'Buffering…'}</button>
+            ${showPauseToggle ? `<button class="t-pause">${isPaused ? 'Resume' : 'Pause'}</button>` : ''}
             ${canSave ? `<button class="t-save">Save to Library</button>` : ''}
           </div>
           <button class="card-delete" title="Remove torrent">
@@ -2797,12 +2856,32 @@
         card.querySelector('.t-watch').addEventListener('click', () => {
           if (canWatch) playTorrent(t);
         });
+        const pauseBtn = card.querySelector('.t-pause');
+        if (pauseBtn) {
+          pauseBtn.addEventListener('click', () => togglePauseTorrent(t.infoHash, isPaused, pauseBtn));
+        }
         const saveBtn = card.querySelector('.t-save');
         if (saveBtn) {
           saveBtn.addEventListener('click', () => saveTorrentToLibrary(t, saveBtn));
         }
         card.querySelector('.card-delete').addEventListener('click', () => removeTorrent(t.infoHash));
         return card;
+      };
+
+      const togglePauseTorrent = async (infoHash, isPaused, btn) => {
+        const action = isPaused ? 'resume' : 'pause';
+        btn.disabled = true;
+        try {
+          const res = await fetch(`${API}/torrent/${infoHash}/${action}`, { method: 'POST' });
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(body.error || `HTTP ${res.status}`);
+          }
+          loadTorrents();
+        } catch (err) {
+          alert(`Failed to ${action}: ${err.message}`);
+          btn.disabled = false;
+        }
       };
 
       const escapeHtml = (s) =>
