@@ -979,6 +979,33 @@
         padding: 8px 10px;
         outline: none;
       }
+      .edit-probe {
+        font-family: 'DM Sans', sans-serif;
+        font-size: 12px;
+        color: var(--text-dim);
+        margin-bottom: 10px;
+        line-height: 1.5;
+      }
+      .edit-probe .warn {
+        color: #d97757;
+      }
+      .edit-probe .ok {
+        color: var(--gold-soft);
+      }
+      .edit-reprocess {
+        width: 100%;
+      }
+      .edit-reprocess:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .edit-reprocess-note {
+        font-family: 'DM Sans', sans-serif;
+        font-size: 11px;
+        color: var(--text-faint);
+        margin-top: 8px;
+        line-height: 1.4;
+      }
 
       .sub-clear {
         background: transparent;
@@ -1633,6 +1660,13 @@
             <button class="sub-pick" id="editSubPick" type="button">+ Add subtitle file</button>
           </div>
         </div>
+
+        <div class="edit-section">
+          <div class="edit-label">Video file</div>
+          <div class="edit-probe" id="editProbe">Probing…</div>
+          <button class="sub-pick edit-reprocess" id="editReprocess" type="button">Re-process video file</button>
+          <div class="edit-reprocess-note">Pulls embedded subtitles out as sidecar files and re-encodes audio if the browser can't play it. May take a while for large files.</div>
+        </div>
       </div>
     </div>
 
@@ -1704,6 +1738,8 @@
       const editSubInput = document.getElementById('editSubInput');
       const editSubLang = document.getElementById('editSubLang');
       const editSubPick = document.getElementById('editSubPick');
+      const editProbe = document.getElementById('editProbe');
+      const editReprocess = document.getElementById('editReprocess');
       const progressEl = document.getElementById('progress');
       const progressFill = document.getElementById('progressFill');
       const progressName = document.getElementById('progressName');
@@ -2264,6 +2300,45 @@
         renderEditSubList(subs);
       };
 
+      // Pull a probe of the underlying file (audio codec, container,
+      // embedded subtitle streams) and render a short status line plus
+      // a hint for the re-process button.
+      const refreshEditProbe = async () => {
+        editProbe.textContent = 'Probing…';
+        try {
+          const r = await fetch(`${API}/videos/${encodeURIComponent(editing.videoName)}/probe`);
+          if (!r.ok) {
+            editProbe.textContent = 'Could not probe video file.';
+            return;
+          }
+          const p = await r.json();
+          const audio = p.audioCodec || 'none';
+          const audioClass = p.audioBrowserCompatible ? 'ok' : 'warn';
+          const container = p.container.replace('.', '').toUpperCase();
+          const containerClass = p.containerBrowserCompatible ? 'ok' : 'warn';
+          const extractable = p.embeddedSubtitles.filter((s) => s.extractable);
+          const bitmapCount = p.embeddedSubtitles.length - extractable.length;
+          const parts = [
+            `<span class="${containerClass}">${container}</span> container`,
+            `<span class="${audioClass}">${audio.toUpperCase()}</span> audio`,
+          ];
+          if (p.videoCodec) parts.push(`${p.videoCodec.toUpperCase()} video`);
+          let line = parts.join(' · ');
+          if (extractable.length) {
+            line += `<br/><span class="warn">${extractable.length} embedded subtitle track${extractable.length === 1 ? '' : 's'} not yet extracted</span>`;
+          }
+          if (bitmapCount) {
+            line += `<br/>${bitmapCount} bitmap subtitle track${bitmapCount === 1 ? '' : 's'} (cannot extract)`;
+          }
+          if (!p.browserCompatible) {
+            line += `<br/><span class="warn">Browser cannot play this file as-is — re-process to fix.</span>`;
+          }
+          editProbe.innerHTML = line;
+        } catch {
+          editProbe.textContent = 'Could not probe video file.';
+        }
+      };
+
       const refreshEditPoster = async () => {
         // /videos returns the canonical poster URL, including a fresh
         // mtime-based query string. Re-fetch instead of guessing.
@@ -2289,8 +2364,40 @@
         renderEditPoster(videoName, v.poster);
         const subs = await fetchSubtitlesForVideo(videoName);
         renderEditSubList(subs);
+        refreshEditProbe();
         openModal(editModal);
       };
+
+      editReprocess.addEventListener('click', async () => {
+        if (!editing) return;
+        if (!confirm('Re-process this video?\n\nThis re-encodes audio if needed and extracts embedded subtitles. It can take a while for large files.')) return;
+        editReprocess.disabled = true;
+        const originalLabel = editReprocess.textContent;
+        editReprocess.textContent = 'Re-processing…';
+        try {
+          const r = await fetch(`${API}/videos/${encodeURIComponent(editing.videoName)}/reprocess`, {
+            method: 'POST',
+          });
+          const body = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(body.error || 'Re-process failed');
+          // The video filename may have changed (.mkv → .mp4). Track the
+          // new name so subsequent edit-modal actions target it.
+          editing.videoName = body.name;
+          editModalSub.textContent = cleanName(body.name);
+          editName.value = cleanName(body.name);
+          await Promise.all([refreshEditSubList(), refreshEditProbe(), refreshEditPoster()]);
+          loadVideos();
+          const addedMsg = body.subtitlesAdded && body.subtitlesAdded.length
+            ? ` Extracted ${body.subtitlesAdded.length} subtitle${body.subtitlesAdded.length === 1 ? '' : 's'}.`
+            : '';
+          alert(`Re-process complete.${addedMsg}`);
+        } catch (err) {
+          alert(err.message);
+        } finally {
+          editReprocess.disabled = false;
+          editReprocess.textContent = originalLabel;
+        }
+      });
 
       editNameSave.addEventListener('click', async () => {
         if (!editing) return;

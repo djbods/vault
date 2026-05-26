@@ -370,6 +370,7 @@ const LANG_3TO2 = {
   chi: 'zh', zho: 'zh', ara: 'ar', hin: 'hi', tur: 'tr', vie: 'vi',
   tha: 'th', ind: 'id', heb: 'he', cze: 'cs', ces: 'cs', gre: 'el',
   ell: 'el', hun: 'hu', rum: 'ro', ron: 'ro', ukr: 'uk',
+  nob: 'nb', nno: 'nn',
 };
 const normalizeLang = (raw) => {
   const m = String(raw || '').toLowerCase().match(/^[a-z]{2,3}$/);
@@ -478,6 +479,97 @@ const extractEmbeddedSubtitles = async (srcPath, targetDir, targetBase) => {
   }
   return written;
 };
+
+// Browser-compatible audio codecs (matches BROWSER_FRIENDLY_AUDIO) and the
+// MP4-in-a-browser-friendly-container constraint. Used by /probe so the
+// edit modal can show why a file might not play.
+const BROWSER_FRIENDLY_CONTAINERS = new Set(['.mp4', '.m4v', '.webm']);
+
+// Quick health-check for an existing library file. Reports container, video
+// + audio codec, embedded subtitle streams, and whether the browser is
+// likely to be able to play the file as-is. Used by the edit modal to
+// decide whether to surface the "Re-process" action.
+app.get('/videos/:filename/probe', async (req, res) => {
+  const filepath = resolveSafe(req.params.filename);
+  if (!filepath || !fs.existsSync(filepath)) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  try {
+    const [base, subs] = await Promise.all([
+      probeFile(filepath),
+      probeSubtitleStreams(filepath).catch(() => []),
+    ]);
+    const ext = path.extname(filepath).toLowerCase();
+    const audioOk = !base.audioCodec || BROWSER_FRIENDLY_AUDIO.has(base.audioCodec);
+    const containerOk = BROWSER_FRIENDLY_CONTAINERS.has(ext);
+    res.json({
+      container: ext,
+      videoCodec: base.videoCodec,
+      audioCodec: base.audioCodec,
+      audioBrowserCompatible: audioOk,
+      containerBrowserCompatible: containerOk,
+      browserCompatible: audioOk && containerOk,
+      embeddedSubtitles: subs.map((s) => ({
+        codec: s.codec,
+        lang: s.lang,
+        extractable: TEXT_SUBTITLE_CODECS.has(s.codec),
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Re-run an already-imported file through prepareForLibrary (fixes audio /
+// container) and extractEmbeddedSubtitles (pulls embedded tracks out as
+// VTT sidecars). For existing library files that bypassed the new import
+// pipeline. Output is always <base>.mp4 — if the source extension differs,
+// the original is removed once the new MP4 is in place.
+app.post('/videos/:filename/reprocess', async (req, res) => {
+  const filepath = resolveSafe(req.params.filename);
+  if (!filepath || !fs.existsSync(filepath)) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  const base = baseNameNoExt(path.basename(filepath));
+  const oldExt = path.extname(filepath).toLowerCase();
+  // Write to a hidden temp filename in the same directory so renameSync
+  // is atomic (same volume — iCloud rejects cross-volume renames). The
+  // leading dot also keeps it out of /videos listings while in progress.
+  const tempBase = `.${base}.reprocess-${Date.now()}`;
+  const tempPath = path.join(VIDEOS_DIR, `${tempBase}.mp4`);
+  let writtenSubs = [];
+  let probeBefore = null;
+  let probeAfter = null;
+
+  try {
+    probeBefore = await probeFile(filepath).catch(() => null);
+    // Extract subs from the source first — we delete it later, so this
+    // is the only chance to read its subtitle streams.
+    writtenSubs = await extractEmbeddedSubtitles(filepath, VIDEOS_DIR, base);
+    // Re-encode/remux into the temp MP4 (always .mp4 output).
+    await prepareForLibrary(filepath, VIDEOS_DIR, tempBase);
+    // Drop the original. If oldExt was already .mp4 the rename below
+    // will overwrite it — but unlink first is safer in case the user
+    // is mid-stream (the browser will error and retry).
+    try { fs.unlinkSync(filepath); } catch {}
+    const finalPath = path.join(VIDEOS_DIR, `${base}.mp4`);
+    fs.renameSync(tempPath, finalPath);
+    // Bust ffprobe cache so the next /probe reflects the new file.
+    probeCache.delete(filepath);
+    probeCache.delete(finalPath);
+    probeAfter = await probeFile(finalPath).catch(() => null);
+    res.json({
+      name: path.basename(finalPath),
+      before: probeBefore,
+      after: probeAfter,
+      subtitlesAdded: writtenSubs,
+    });
+  } catch (err) {
+    // Best-effort cleanup of the temp file if ffmpeg failed partway.
+    try { fs.unlinkSync(tempPath); } catch {}
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.get('/stream/:filename', (req, res) => {
   const filepath = resolveSafe(req.params.filename);
