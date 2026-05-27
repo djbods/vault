@@ -77,6 +77,53 @@
         flex-direction: column;
       }
 
+      /* Background status pill — used by the TMDB auto-backfill so the user
+         can see something is happening without modal interruption. */
+      .status-toast {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        z-index: 80;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 14px;
+        background: rgba(17, 16, 23, 0.92);
+        border: 1px solid rgba(212, 160, 74, 0.25);
+        border-radius: 999px;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        font-family: 'DM Sans', sans-serif;
+        font-size: 12px;
+        letter-spacing: 0.04em;
+        color: var(--text);
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+        opacity: 0;
+        transform: translateY(8px);
+        transition: opacity 0.25s ease, transform 0.25s ease;
+        pointer-events: none;
+      }
+      .status-toast[data-visible="true"] {
+        opacity: 1;
+        transform: translateY(0);
+      }
+      .status-toast-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--gold);
+        box-shadow: 0 0 8px rgba(212, 160, 74, 0.65);
+        animation: status-pulse 1.2s ease-in-out infinite;
+      }
+      .status-toast[data-state="done"] .status-toast-dot {
+        animation: none;
+        background: var(--gold-soft);
+      }
+      @keyframes status-pulse {
+        0%, 100% { opacity: 0.4; transform: scale(0.85); }
+        50%      { opacity: 1;   transform: scale(1); }
+      }
+
       header {
         flex: 0 0 auto;
         display: flex;
@@ -2183,6 +2230,10 @@
     </style>
   </head>
   <body>
+    <div class="status-toast" id="statusToast" role="status" aria-live="polite" hidden>
+      <span class="status-toast-dot"></span>
+      <span class="status-toast-text" id="statusToastText"></span>
+    </div>
     <div class="app">
       <header>
         <div>
@@ -2959,6 +3010,26 @@
       const applyPoster = async (poster, videoName) => {
         if (poster.kind === 'file') return uploadPosterFile(poster.file, videoName);
         if (poster.kind === 'tmdb') return fetchTmdbPoster(poster.posterPath, videoName, poster.tmdbId);
+      };
+
+      // ---- Status toast (TMDB backfill + other background work)
+      const statusToast = document.getElementById('statusToast');
+      const statusToastText = document.getElementById('statusToastText');
+      let statusToastHideTimer = null;
+      const showStatusToast = (text, { state = 'running', autoHideMs = 0 } = {}) => {
+        if (statusToastHideTimer) { clearTimeout(statusToastHideTimer); statusToastHideTimer = null; }
+        statusToastText.textContent = text;
+        statusToast.dataset.state = state;
+        statusToast.hidden = false;
+        // Defer the visibility flip a tick so the transition runs.
+        requestAnimationFrame(() => { statusToast.dataset.visible = 'true'; });
+        if (autoHideMs > 0) {
+          statusToastHideTimer = setTimeout(hideStatusToast, autoHideMs);
+        }
+      };
+      const hideStatusToast = () => {
+        statusToast.dataset.visible = 'false';
+        setTimeout(() => { if (statusToast.dataset.visible !== 'true') statusToast.hidden = true; }, 300);
       };
 
       // ---- TMDB picker
@@ -4473,7 +4544,37 @@
       });
 
       // ---- Boot
-      loadVideos();
+      const runTmdbBackfill = async () => {
+        if (!(await ensureTmdbStatus())) return;
+        // Only worth asking if at least one library file has no tmdbId — saves
+        // a server round-trip for fully-tagged libraries on every reload.
+        if (!libraryCache.some((v) => !v.tmdbId)) return;
+        showStatusToast('Looking up film details…');
+        try {
+          const r = await fetch(`${API}/tmdb/backfill`, { method: 'POST' });
+          const summary = await r.json().catch(() => ({}));
+          if (!r.ok) {
+            showStatusToast(summary.error || 'TMDB lookup failed', { state: 'done', autoHideMs: 4000 });
+            return;
+          }
+          if (summary.matched > 0) {
+            await loadVideos();
+            const word = summary.matched === 1 ? 'film' : 'films';
+            showStatusToast(`Matched ${summary.matched} ${word} to TMDB`, { state: 'done', autoHideMs: 3500 });
+          } else if (summary.candidates > 0) {
+            showStatusToast('No confident TMDB matches', { state: 'done', autoHideMs: 3000 });
+          } else {
+            hideStatusToast();
+          }
+        } catch (err) {
+          showStatusToast('TMDB lookup unavailable', { state: 'done', autoHideMs: 3000 });
+        }
+      };
+
+      (async () => {
+        await loadVideos();
+        runTmdbBackfill();
+      })();
     </script>
   </body>
 </html>
