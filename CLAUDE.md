@@ -300,21 +300,19 @@ Aesthetic principles:
   exposed in Safari, so dual-audio MKVs play back with whatever stream
   ffmpeg picked at import. Worth a server-side re-mux endpoint that
   lets the user choose the audio stream per file.
-- TMDB-derived genre data is only populated when the user picks a
-  poster (or via `/tmdb/save-metadata` backfill). Consider auto-running
-  the lookup on first library load for any video that has no `tmdbId`
-  but a confident filename match.
-- README is still stale vs the actual feature set — worth a refresh.
-- Overview / cast / director from TMDB still aren't stored; would feed
-  into a richer detail view if/when one exists.
+- **Detail view** — overview / cast / director are now stored but only
+  surface in the edit modal. A dedicated detail view (or a richer
+  hover preview) would put them in front of the user during browsing.
 - Resume position is a single point per file — no separate per-user or
   per-session tracking (vault is single-user, so this is intentional).
-- Continue-watching shelf on the home grid would surface in-progress
-  films at a glance — the `resumePosition` field is already there.
+- The TMDB auto-backfill heuristic is intentionally conservative — files
+  with very generic names (e.g. `Movie.mp4`) are skipped rather than
+  guessed. The 14-day retry window means newly-released films
+  eventually re-attempt as TMDB's catalogue catches up.
 
 ---
 
-*Last updated: 2026-05-27 — Session 2 wrap-up: custom Netflix-style
-player chrome (auto-hiding overlay, scrub bar with hover preview,
-keyboard shortcuts, mobile double-tap skip, persistent resume position,
-95%-watched heuristic) landed.*
+*Last updated: 2026-05-27 — Session 3 wrap-up: extended TMDB metadata
+(overview / cast / director), auto-backfill on first library load
+with a confidence heuristic + status pill, and a Continue Watching
+shelf on the home grid with resume progress bars. README refreshed.*
