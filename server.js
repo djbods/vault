@@ -1201,6 +1201,194 @@ app.post('/tmdb/save-metadata', async (req, res) => {
   }
 });
 
+// ---------- Auto-backfill ----------
+//
+// Scans the library for videos that have never had a TMDB lookup and runs
+// `/tmdb/search` against a cleaned filename. If exactly one strong-confidence
+// candidate is found (title + year both match, or title matches uniquely
+// without ambiguity), we persist its metadata and download the poster when
+// the file doesn't already have one. Every attempt — match or not — stamps
+// `tmdbBackfillAttemptedAt` so we don't re-run the same searches every
+// time the frontend loads.
+
+const BACKFILL_THROTTLE_MS = 220;          // TMDB rate-limit headroom
+const BACKFILL_RETRY_AFTER_MS = 1000 * 60 * 60 * 24 * 14; // 14 days
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Drop apostrophes outright before collapsing other punctuation so
+// "Clancy's" and "Clancys" normalise to the same token — otherwise
+// the apostrophe expands to a space and breaks prefix matching.
+const normalizeForMatch = (s) =>
+  String(s || '')
+    .toLowerCase()
+    .replace(/['‘’]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+// Returns the TMDB result we're confident matches the query, or null.
+// The bar is intentionally high — a mismatched poster is worse than no poster.
+const pickConfidentMatch = (results, queryTitle, queryYear) => {
+  if (!Array.isArray(results) || results.length === 0) return null;
+  const nq = normalizeForMatch(queryTitle);
+  if (!nq) return null;
+
+  const scored = results.map((r) => {
+    const nt = normalizeForMatch(r.title);
+    const exact = nt === nq;
+    const prefix = nt.startsWith(nq) || nq.startsWith(nt);
+    const yearMatch = queryYear && r.year === queryYear;
+    return { r, exact, prefix, yearMatch };
+  });
+
+  // Title + year both match → strongest signal.
+  const exactWithYear = scored.find((s) => s.exact && s.yearMatch);
+  if (exactWithYear) return exactWithYear.r;
+
+  // Year was extracted from filename and exactly one result lines up on year.
+  if (queryYear) {
+    const yearMatches = scored.filter((s) => s.yearMatch);
+    if (yearMatches.length === 1 && (yearMatches[0].exact || yearMatches[0].prefix)) {
+      return yearMatches[0].r;
+    }
+  }
+
+  // Only one search result and the title lines up — trust it.
+  if (scored.length === 1 && (scored[0].exact || scored[0].prefix)) {
+    return scored[0].r;
+  }
+
+  // Top result is an exact normalised-title match and no other result shares
+  // that title — TMDB ranks by popularity, so an exact top hit is usually it.
+  if (scored[0].exact) {
+    const ties = scored.filter((s) => s.exact).length;
+    if (ties === 1) return scored[0].r;
+  }
+
+  return null;
+};
+
+const downloadTmdbPosterToLibrary = async (posterPath, videoBaseName) => {
+  if (!posterPath || !/^\/[\w./-]+\.(jpg|jpeg|png|webp)$/i.test(posterPath)) return null;
+  const r = await fetch(`https://image.tmdb.org/t/p/w780${posterPath}`);
+  if (!r.ok) throw new Error(`Poster fetch ${r.status}`);
+  const buf = Buffer.from(await r.arrayBuffer());
+  let ext = path.extname(posterPath).toLowerCase();
+  if (!POSTER_EXTS.includes(ext)) ext = '.jpg';
+  removeExistingPosters(videoBaseName);
+  const targetName = `${videoBaseName}.poster${ext}`;
+  const targetPath = resolveSafe(targetName);
+  if (!targetPath) throw new Error('Invalid poster path');
+  fs.writeFileSync(targetPath, buf);
+  return targetName;
+};
+
+const runSearchForBackfill = async (filename) => {
+  const raw = cleanQueryForTmdb(filename);
+  if (!raw) return { title: '', year: null, results: [] };
+  let title = raw;
+  let year = null;
+  const m = raw.match(/^(.*?)\s+(\d{4})\s*$/);
+  if (m) { title = m[1].trim(); year = m[2]; }
+
+  const params = new URLSearchParams({
+    query: title,
+    include_adult: 'false',
+    language: 'en-US',
+    page: '1',
+    api_key: TMDB_API_KEY,
+  });
+  if (year) params.set('year', year);
+  const r = await fetch(`https://api.themoviedb.org/3/search/movie?${params.toString()}`);
+  if (!r.ok) throw new Error(`TMDB ${r.status}`);
+  const data = await r.json();
+  const results = (data.results || []).map((m2) => ({
+    id: m2.id,
+    title: m2.title,
+    year: m2.release_date ? m2.release_date.slice(0, 4) : null,
+    posterPath: m2.poster_path,
+  }));
+  return { title, year, results };
+};
+
+app.post('/tmdb/backfill', async (req, res) => {
+  if (!TMDB_API_KEY) {
+    return res.status(503).json({ error: 'TMDB_API_KEY not configured' });
+  }
+
+  let entries;
+  try {
+    entries = fs.readdirSync(VIDEOS_DIR, { withFileTypes: true });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+
+  const now = Date.now();
+  const candidates = entries
+    .filter((e) => {
+      if (!e.isFile() || e.name.startsWith('.')) return false;
+      const ext = path.extname(e.name).toLowerCase();
+      if (!VIDEO_EXTS.has(ext) || SUBTITLE_EXTS.has(ext) || isPosterFile(e.name)) return false;
+      const meta = getVideoMeta(e.name);
+      if (meta.tmdbId) return false;                                  // already linked
+      if (meta.tmdbBackfillAttemptedAt) {
+        const last = Date.parse(meta.tmdbBackfillAttemptedAt);
+        if (Number.isFinite(last) && now - last < BACKFILL_RETRY_AFTER_MS) return false;
+      }
+      return true;
+    })
+    .map((e) => e.name);
+
+  const summary = {
+    candidates: candidates.length,
+    matched: 0,
+    skipped: 0,
+    failed: 0,
+    matches: [],
+  };
+
+  for (const filename of candidates) {
+    try {
+      const { title, year, results } = await runSearchForBackfill(filename);
+      const pick = pickConfidentMatch(results, title, year);
+      if (!pick) {
+        setVideoMeta(filename, { tmdbBackfillAttemptedAt: new Date().toISOString() });
+        summary.skipped += 1;
+      } else {
+        const details = await fetchTmdbMovieDetails(pick.id);
+        // Only fetch a poster if the file doesn't already have one — manual
+        // uploads (or torrent siblings) always win.
+        let posterName = findPoster(filename);
+        if (!posterName && pick.posterPath) {
+          try {
+            posterName = await downloadTmdbPosterToLibrary(pick.posterPath, baseNameNoExt(filename));
+          } catch (e) {
+            console.warn(`[backfill] poster download failed for ${filename}: ${e.message}`);
+          }
+        }
+        setVideoMeta(filename, {
+          tmdbId: details.tmdbId,
+          genres: details.genres,
+          year: details.year,
+          runtime: details.runtime,
+          overview: details.overview,
+          cast: details.cast,
+          director: details.director,
+          tmdbBackfillAttemptedAt: new Date().toISOString(),
+        });
+        summary.matched += 1;
+        summary.matches.push({ name: filename, tmdbId: details.tmdbId, title: pick.title, year: pick.year });
+      }
+    } catch (err) {
+      console.warn(`[backfill] ${filename}: ${err.message}`);
+      summary.failed += 1;
+    }
+    await sleep(BACKFILL_THROTTLE_MS);
+  }
+
+  res.json(summary);
+});
+
 // ---------- Torrents ----------
 
 app.post('/torrent', async (req, res) => {
