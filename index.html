@@ -1201,6 +1201,36 @@
         margin-bottom: 10px;
         line-height: 1.5;
       }
+      .edit-details {
+        font-family: 'DM Sans', sans-serif;
+        font-size: 13px;
+        color: var(--text-dim);
+        line-height: 1.6;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .edit-details-overview {
+        color: var(--text);
+      }
+      .edit-details-row {
+        display: flex;
+        gap: 8px;
+        font-size: 12px;
+      }
+      .edit-details-row dt {
+        flex: 0 0 70px;
+        color: var(--text-faint);
+        text-transform: uppercase;
+        letter-spacing: 0.18em;
+        font-size: 10px;
+        padding-top: 2px;
+      }
+      .edit-details-row dd {
+        flex: 1;
+        margin: 0;
+        color: var(--text);
+      }
       .edit-probe .warn {
         color: #d97757;
       }
@@ -2316,6 +2346,11 @@
           </div>
         </div>
 
+        <div class="edit-section" id="editDetailsSection" style="display:none">
+          <div class="edit-label">Details</div>
+          <div class="edit-details" id="editDetails"></div>
+        </div>
+
         <div class="edit-section">
           <div class="edit-label">Watched</div>
           <label class="edit-toggle">
@@ -3180,6 +3215,29 @@
         } catch {}
       };
 
+      const editDetailsSection = document.getElementById('editDetailsSection');
+      const editDetails = document.getElementById('editDetails');
+
+      const renderEditDetails = (v) => {
+        const overview = v.overview || '';
+        const cast = Array.isArray(v.cast) ? v.cast : [];
+        const director = v.director || '';
+        const year = v.year || '';
+        const runtime = v.runtime ? `${v.runtime} min` : '';
+        const genres = (v.genres || []).join(', ');
+        const rows = [];
+        if (director) rows.push(`<div class="edit-details-row"><dt>Director</dt><dd>${escapeHtml(director)}</dd></div>`);
+        if (cast.length) rows.push(`<div class="edit-details-row"><dt>Cast</dt><dd>${escapeHtml(cast.join(', '))}</dd></div>`);
+        if (year || runtime) {
+          const parts = [year, runtime].filter(Boolean).map(escapeHtml).join(' · ');
+          rows.push(`<div class="edit-details-row"><dt>Year</dt><dd>${parts}</dd></div>`);
+        }
+        if (genres) rows.push(`<div class="edit-details-row"><dt>Genres</dt><dd>${escapeHtml(genres)}</dd></div>`);
+        const hasAny = overview || rows.length;
+        editDetailsSection.style.display = hasAny ? '' : 'none';
+        editDetails.innerHTML = (overview ? `<div class="edit-details-overview">${escapeHtml(overview)}</div>` : '') + rows.join('');
+      };
+
       const openEditModal = async (videoName) => {
         populateEditSubLang();
         editing = { videoName };
@@ -3194,6 +3252,7 @@
         renderEditPoster(videoName, v.poster);
         editWatched.checked = Boolean(v.watched);
         editWatchedLabel.textContent = v.watched ? 'Watched' : 'Not watched';
+        renderEditDetails(v);
         const subs = await fetchSubtitlesForVideo(videoName);
         renderEditSubList(subs);
         refreshEditProbe();
