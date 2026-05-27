@@ -336,7 +336,9 @@ app.get('/videos', (req, res) => {
           overview: meta.overview || null,
           cast: Array.isArray(meta.cast) ? meta.cast : [],
           director: meta.director || null,
+          duration: typeof meta.duration === 'number' && meta.duration > 0 ? meta.duration : null,
           resumePosition: typeof meta.resumePosition === 'number' ? meta.resumePosition : null,
+          lastPlayedAt: meta.lastPlayedAt || null,
         };
       })
       .sort((a, b) => b.modified.localeCompare(a.modified));
@@ -713,6 +715,16 @@ app.patch('/videos/:filename/metadata', (req, res) => {
     patch.resumePosition = raw == null || !Number.isFinite(Number(raw))
       ? null
       : Math.max(0, Number(raw));
+    // Stamp lastPlayedAt whenever we set a non-null resume marker so the
+    // Continue Watching shelf can sort by most recent.
+    if (patch.resumePosition != null) patch.lastPlayedAt = new Date().toISOString();
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'duration')) {
+    const raw = body.duration;
+    const num = Number(raw);
+    // Only accept positive finite numbers — the player only PATCHes after
+    // loadedmetadata, so anything else is noise.
+    patch.duration = Number.isFinite(num) && num > 0 ? num : null;
   }
   if (!Object.keys(patch).length) {
     return res.status(400).json({ error: 'No supported fields in body' });
