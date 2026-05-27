@@ -210,10 +210,16 @@ Key sections:
   hover, video starts muted at 0.5s; `attachAnchorOnHover` flips the
   expansion anchor to left/right when the card is near a grid edge so it
   doesn't overflow.
-- **Player modal** — `<video controls>` with native browser chrome, plus
-  a custom in-frame title bar and CC dropdown (`#playerCC` + `#subMenu`)
-  for multi-language subtitle switching. The bigger Netflix-style player
-  is planned but not built yet.
+- **Player modal** — fully custom Netflix-style chrome over a controls-off
+  `<video>`. The `.player-overlay` holds the title bar, centre
+  play/pause button, scrub bar (with hover tooltip + buffered range), and
+  bottom controls (play, ±10s skip, volume + slider, current/duration,
+  subtitles, PiP, AirPlay, fullscreen). Overlay auto-hides after 3s of
+  pointer inactivity during playback and reappears on movement. Resume
+  position is persisted to the metadata sidecar every ~5s of playback
+  and on close; on re-open the player seeks back (silently) if the saved
+  position is ≥5s and >30s from the end. The 95%-watched heuristic
+  marks the file as watched even if the user quits before `ended` fires.
 - **Library grid** — `#grid`, currently `repeat(auto-fill, minmax(250px,
   1fr))`. Portrait poster cards (`aspect-ratio: 2/3` at rest) that expand
   to landscape on hover.
@@ -290,11 +296,10 @@ Aesthetic principles:
 
 ## Known gaps / future work
 
-- **Custom Netflix-style player** — still on the stock `<video controls>`
-  chrome. Next session's main item: bigger scrub bar, custom
-  subtitle/audio menus, keyboard shortcuts, mobile gestures, persistent
-  resume position (the `resumePosition` field is already supported by
-  the metadata sidecar, just not written yet).
+- **Audio track switching** — HTML5 `audioTracks` is only meaningfully
+  exposed in Safari, so dual-audio MKVs play back with whatever stream
+  ffmpeg picked at import. Worth a server-side re-mux endpoint that
+  lets the user choose the audio stream per file.
 - TMDB-derived genre data is only populated when the user picks a
   poster (or via `/tmdb/save-metadata` backfill). Consider auto-running
   the lookup on first library load for any video that has no `tmdbId`
@@ -302,12 +307,14 @@ Aesthetic principles:
 - README is still stale vs the actual feature set — worth a refresh.
 - Overview / cast / director from TMDB still aren't stored; would feed
   into a richer detail view if/when one exists.
-- The auto-mark-watched fires on the `ended` event only. If the user
-  quits 30 seconds early it stays "unwatched" — a 95%-played heuristic
-  on `timeupdate` would be more forgiving.
+- Resume position is a single point per file — no separate per-user or
+  per-session tracking (vault is single-user, so this is intentional).
+- Continue-watching shelf on the home grid would surface in-progress
+  films at a glance — the `resumePosition` field is already there.
 
 ---
 
-*Last updated: 2026-05-26 — Session 1 wrap-up: torrent pause/resume +
-ETA, watched indicator + metadata sidecar, TMDB genre persistence +
-pill filter, larger cards + mobile grid all landed.*
+*Last updated: 2026-05-27 — Session 2 wrap-up: custom Netflix-style
+player chrome (auto-hiding overlay, scrub bar with hover preview,
+keyboard shortcuts, mobile double-tap skip, persistent resume position,
+95%-watched heuristic) landed.*

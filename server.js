@@ -333,6 +333,7 @@ app.get('/videos', (req, res) => {
           tmdbId: meta.tmdbId || null,
           year: meta.year || null,
           runtime: meta.runtime || null,
+          resumePosition: typeof meta.resumePosition === 'number' ? meta.resumePosition : null,
         };
       })
       .sort((a, b) => b.modified.localeCompare(a.modified));
@@ -694,12 +695,21 @@ app.patch('/videos/:filename/metadata', (req, res) => {
   if (Object.prototype.hasOwnProperty.call(body, 'watched')) {
     patch.watched = Boolean(body.watched);
     patch.watchedAt = patch.watched ? new Date().toISOString() : null;
+    // Marking watched clears any resume marker so the player doesn't seek
+    // back into a film the user just finished.
+    if (patch.watched) patch.resumePosition = null;
   }
   if (Object.prototype.hasOwnProperty.call(body, 'genres')) {
     patch.genres = Array.isArray(body.genres) ? body.genres.map(String) : [];
   }
   if (Object.prototype.hasOwnProperty.call(body, 'tmdbId')) {
     patch.tmdbId = body.tmdbId == null ? null : Number(body.tmdbId) || null;
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'resumePosition')) {
+    const raw = body.resumePosition;
+    patch.resumePosition = raw == null || !Number.isFinite(Number(raw))
+      ? null
+      : Math.max(0, Number(raw));
   }
   if (!Object.keys(patch).length) {
     return res.status(400).json({ error: 'No supported fields in body' });
