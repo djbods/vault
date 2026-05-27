@@ -1979,7 +1979,15 @@
     </div>
 
     <script>
-      const API = 'http://localhost:3001';
+      // Use the origin the page was loaded from so the API base matches the
+      // host the browser sees. Loading from http://<mac-lan-ip>:3001/ then
+      // produces stream URLs the LAN can reach — which is what Safari hands
+      // to an AirPlay receiver (the TV fetches the URL itself; "localhost"
+      // resolves to the TV, not the Mac). Falls back to localhost when the
+      // page is opened via file:// so the existing dev flow still works.
+      const API = location.protocol === 'http:' || location.protocol === 'https:'
+        ? location.origin
+        : 'http://localhost:3001';
 
       // ---- DOM refs
       const gridEl = document.getElementById('grid');
