@@ -356,7 +356,7 @@ const probeFile = (filepath) =>
     if (cached) return resolve(cached);
     const ff = spawn('ffprobe', [
       '-v', 'error',
-      '-show_entries', 'stream=index,codec_type,codec_name:format=duration',
+      '-show_entries', 'stream=index,codec_type,codec_name,channels,channel_layout:format=duration',
       '-of', 'json',
       filepath,
     ]);
@@ -374,6 +374,8 @@ const probeFile = (filepath) =>
         const video = streams.find((s) => s.codec_type === 'video');
         const result = {
           audioCodec: audio ? (audio.codec_name || '').toLowerCase() : '',
+          audioChannels: audio ? (audio.channels || 0) : 0,
+          audioChannelLayout: audio ? (audio.channel_layout || '').toLowerCase() : '',
           videoCodec: video ? (video.codec_name || '').toLowerCase() : '',
           duration: parseFloat((parsed.format || {}).duration) || 0,
         };
@@ -387,14 +389,26 @@ const probeFile = (filepath) =>
 
 // Convert a source video into a browser-ready MP4 in the library. Video is
 // always copied (no re-encode → fast, lossless). Audio is copied if already
-// browser-friendly, otherwise re-encoded to AAC 256k. HEVC streams get the
-// hvc1 tag forced so Chrome/Safari accept the parameter sets in hvcC.
-// Writes <targetDir>/<targetBase>.mp4 with +faststart for byte-range play.
+// browser-friendly AND already stereo with a known channel layout; otherwise
+// re-encoded to stereo AAC 192k. macOS CoreAudio (Safari + QuickTime) plays
+// no sound on multichannel AAC with channel_layout=unknown, and tagging the
+// layout post-hoc with `-c:a copy` isn't reliable across muxers — so the
+// only robust fix is to downmix to stereo when we see >2 channels or an
+// unknown layout. HEVC streams get the hvc1 tag forced so Chrome/Safari
+// accept the parameter sets in hvcC. Writes <targetDir>/<targetBase>.mp4
+// with +faststart for byte-range play.
 const prepareForLibrary = async (srcPath, targetDir, targetBase) => {
-  const probe = await probeFile(srcPath).catch(() => ({ audioCodec: '', videoCodec: '' }));
+  const probe = await probeFile(srcPath).catch(() => ({
+    audioCodec: '', videoCodec: '', audioChannels: 0, audioChannelLayout: '',
+  }));
   const audioCodec = probe.audioCodec || '';
   const videoCodec = probe.videoCodec || '';
-  const needsAudioTranscode = audioCodec && !BROWSER_FRIENDLY_AUDIO.has(audioCodec);
+  const audioChannels = probe.audioChannels || 0;
+  const audioChannelLayout = probe.audioChannelLayout || '';
+  const needsAudioRecodec = audioCodec && !BROWSER_FRIENDLY_AUDIO.has(audioCodec);
+  const needsAudioDownmix = audioChannels > 2 ||
+    (audioChannels > 1 && (!audioChannelLayout || audioChannelLayout === 'unknown'));
+  const needsAudioTranscode = needsAudioRecodec || needsAudioDownmix;
   const isHevc = videoCodec === 'hevc' || videoCodec === 'h265';
 
   const outPath = path.join(targetDir, `${targetBase}.mp4`);
@@ -410,7 +424,7 @@ const prepareForLibrary = async (srcPath, targetDir, targetBase) => {
       '-c:v', 'copy',
       ...(isHevc ? ['-tag:v', 'hvc1'] : []),
       '-c:a', needsAudioTranscode ? 'aac' : 'copy',
-      ...(needsAudioTranscode ? ['-b:a', '256k'] : []),
+      ...(needsAudioTranscode ? ['-b:a', '192k', '-ac', '2'] : []),
       // +faststart moves moov to the front so the result streams cleanly
       // over byte-range from the first request.
       '-movflags', '+faststart',
@@ -585,12 +599,20 @@ app.get('/videos/:filename/probe', async (req, res) => {
       probeSubtitleStreams(filepath).catch(() => []),
     ]);
     const ext = path.extname(filepath).toLowerCase();
-    const audioOk = !base.audioCodec || BROWSER_FRIENDLY_AUDIO.has(base.audioCodec);
+    const codecOk = !base.audioCodec || BROWSER_FRIENDLY_AUDIO.has(base.audioCodec);
+    // Mirror the prepareForLibrary downmix rule so the edit modal flags
+    // files with multichannel / unknown-layout audio as needing reprocess.
+    const channelsOk = base.audioChannels <= 2 &&
+      (!base.audioChannels || base.audioChannels === 1 ||
+        (base.audioChannelLayout && base.audioChannelLayout !== 'unknown'));
+    const audioOk = codecOk && channelsOk;
     const containerOk = BROWSER_FRIENDLY_CONTAINERS.has(ext);
     res.json({
       container: ext,
       videoCodec: base.videoCodec,
       audioCodec: base.audioCodec,
+      audioChannels: base.audioChannels,
+      audioChannelLayout: base.audioChannelLayout,
       audioBrowserCompatible: audioOk,
       containerBrowserCompatible: containerOk,
       browserCompatible: audioOk && containerOk,
