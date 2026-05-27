@@ -337,6 +337,79 @@
         padding: 40px 0;
       }
 
+      /* Continue Watching shelf — horizontal scroll row of in-progress films
+         above the main grid. Reuses .card markup for visual consistency. */
+      .shelf {
+        margin: 0 0 36px;
+      }
+      .shelf-head {
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+        margin-bottom: 16px;
+      }
+      .shelf-title {
+        font-family: 'Playfair Display', serif;
+        font-weight: 500;
+        font-size: 22px;
+        letter-spacing: 0.04em;
+        margin: 0;
+        color: var(--text);
+      }
+      .shelf-count {
+        font-family: 'DM Sans', sans-serif;
+        font-size: 11px;
+        letter-spacing: 0.3em;
+        text-transform: uppercase;
+        color: var(--text-faint);
+      }
+      .shelf-row {
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(180px, 220px);
+        gap: 18px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding-bottom: 8px;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(212, 160, 74, 0.2) transparent;
+      }
+      .shelf-row::-webkit-scrollbar { height: 6px; }
+      .shelf-row::-webkit-scrollbar-track { background: transparent; }
+      .shelf-row::-webkit-scrollbar-thumb {
+        background: rgba(212, 160, 74, 0.18);
+        border-radius: 2px;
+      }
+      /* Shelf cards stay inside their slot — no bloom into landscape. */
+      .card-slot--shelf .card:hover {
+        width: 100%;
+        box-shadow:
+          0 18px 40px -16px rgba(0, 0, 0, 0.7),
+          0 0 28px -10px rgba(212, 160, 74, 0.2);
+      }
+      .card-slot--shelf .card:hover .card-play {
+        /* Still surface the play affordance — just don't widen the card. */
+        opacity: 1;
+      }
+
+      /* Progress bar sits flush with the bottom of the card, above both
+         the gradient overlay and the .card-info title row. */
+      .card-progress {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 3px;
+        background: rgba(0, 0, 0, 0.55);
+        overflow: hidden;
+        z-index: 4;
+      }
+      .card-progress-fill {
+        height: 100%;
+        background: var(--gold);
+        box-shadow: 0 0 6px rgba(212, 160, 74, 0.55);
+      }
+
       .grid {
         display: grid;
         /* Set autotrack */
@@ -2249,6 +2322,13 @@
 
       <main>
         <section class="view active" id="viewLibrary">
+          <section class="shelf" id="continueShelf" hidden>
+            <header class="shelf-head">
+              <h2 class="shelf-title">Continue Watching</h2>
+              <span class="shelf-count" id="continueShelfCount"></span>
+            </header>
+            <div class="shelf-row" id="continueShelfRow"></div>
+          </section>
           <div class="genre-bar" id="genreBar"></div>
           <div class="grid" id="grid"></div>
           <div class="empty" id="libraryEmpty" style="display: none">
@@ -2740,7 +2820,13 @@
       const openModal = (el) => el.classList.add('active');
       const closeModal = (el) => {
         el.classList.remove('active');
-        if (el === playerModal) resetPlayer();
+        if (el === playerModal) {
+          resetPlayer();
+          // Refresh the library so the Continue Watching shelf reflects the
+          // resume position that was just saved (and removes the card if
+          // the user watched past 95% / dismissed near the end).
+          loadVideos();
+        }
         if (el === uploadModal) resetUploadModal();
       };
 
@@ -3764,6 +3850,16 @@
       playerEl.addEventListener('loadedmetadata', () => {
         playerDuration.textContent = formatTime(playerEl.duration);
         updateProgress();
+        // Persist the duration to the sidecar on first playback so the
+        // Continue Watching shelf can render an accurate progress bar
+        // without re-probing every file server-side. Fire-and-forget.
+        if (currentLocalVideo && Number.isFinite(playerEl.duration) && playerEl.duration > 0) {
+          fetch(`${API}/videos/${encodeURIComponent(currentLocalVideo)}/metadata`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ duration: playerEl.duration }),
+          }).catch(() => {});
+        }
       });
 
       const updateProgress = () => {
@@ -4171,9 +4267,32 @@
         else alert('Failed to delete');
       };
 
-      const renderCard = (video) => {
+      const computeProgress = (video) => {
+        if (video.watched) return null;
+        const resume = Number(video.resumePosition);
+        const duration = Number(video.duration);
+        if (!Number.isFinite(resume) || resume <= 0) return null;
+        if (!Number.isFinite(duration) || duration <= 0) {
+          return { pct: null, remaining: null };
+        }
+        const pct = Math.max(0, Math.min(100, (resume / duration) * 100));
+        const remainingSec = Math.max(0, duration - resume);
+        return { pct, remaining: remainingSec };
+      };
+
+      const formatRemaining = (sec) => {
+        if (!Number.isFinite(sec) || sec <= 0) return '';
+        const m = Math.round(sec / 60);
+        if (m < 60) return `${m}m left`;
+        const h = Math.floor(m / 60);
+        const r = m % 60;
+        return r === 0 ? `${h}h left` : `${h}h ${r}m left`;
+      };
+
+      const renderCard = (video, opts = {}) => {
+        const { inShelf = false } = opts;
         const slot = document.createElement('div');
-        slot.className = 'card-slot';
+        slot.className = 'card-slot' + (inShelf ? ' card-slot--shelf' : '');
         const card = document.createElement('div');
         card.className = 'card' + (video.watched ? ' card--watched' : '');
         const streamUrl = `${API}/stream/${encodeURIComponent(video.name)}`;
@@ -4183,10 +4302,15 @@
         const watchedBadge = video.watched
           ? `<div class="card-watched-badge"><svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>Watched</div>`
           : '';
+        const progress = computeProgress(video);
+        const progressBar = progress && progress.pct != null
+          ? `<div class="card-progress"><div class="card-progress-fill" style="width:${progress.pct.toFixed(1)}%"></div></div>`
+          : '';
         card.innerHTML = `
           <div class="card-media">
             ${posterHtml}
             ${watchedBadge}
+            ${progressBar}
             <div class="card-play">
               <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
             </div>
@@ -4211,7 +4335,11 @@
               ${video.year && (video.genres || []).length ? `<span class="dot"></span>` : ''}
               ${(video.genres || []).length ? `<span>${escapeHtml(video.genres[0])}</span>` : ''}
               ${(video.year || (video.genres || []).length) ? `<span class="dot"></span>` : ''}
-              <span class="card-meta-size">${formatSize(video.size)}</span>
+              <span class="card-meta-size">${
+                progress && progress.remaining != null
+                  ? formatRemaining(progress.remaining)
+                  : (progress ? 'Continue' : formatSize(video.size))
+              }</span>
             </div>
           </div>
         `;
@@ -4227,8 +4355,15 @@
           e.stopPropagation();
           openEditModal(video.name);
         });
-        attachHoverPreview(card, video, streamUrl);
-        attachAnchorOnHover(card, slot);
+        // Shelf cards live in a horizontally-scrolling, overflow-clipped row
+        // so the bloom-into-landscape transform and autoplay preview would
+        // either get hidden or push the card outside its slot. The grid
+        // hover handlers also measure against gridEl, which doesn't apply
+        // to the shelf row — skip both.
+        if (!inShelf) {
+          attachHoverPreview(card, video, streamUrl);
+          attachAnchorOnHover(card, slot);
+        }
         slot.appendChild(card);
         return slot;
       };
@@ -4316,6 +4451,35 @@
         });
       };
 
+      const continueShelfEl = document.getElementById('continueShelf');
+      const continueShelfRowEl = document.getElementById('continueShelfRow');
+      const continueShelfCountEl = document.getElementById('continueShelfCount');
+
+      const renderContinueShelf = () => {
+        // In-progress = has a non-trivial resume marker and not flagged watched.
+        // Sorted by lastPlayedAt desc so the most recently touched film is on
+        // the left. Cap to 12 to keep the row tidy.
+        const inProgress = libraryCache
+          .filter((v) => !v.watched && Number(v.resumePosition) > 0)
+          .sort((a, b) => {
+            const ta = Date.parse(a.lastPlayedAt || a.modified || 0);
+            const tb = Date.parse(b.lastPlayedAt || b.modified || 0);
+            return tb - ta;
+          })
+          .slice(0, 12);
+
+        if (!inProgress.length) {
+          continueShelfEl.hidden = true;
+          continueShelfRowEl.innerHTML = '';
+          return;
+        }
+        continueShelfEl.hidden = false;
+        continueShelfCountEl.textContent =
+          inProgress.length === 1 ? '1 film' : `${inProgress.length} films`;
+        continueShelfRowEl.innerHTML = '';
+        inProgress.forEach((v) => continueShelfRowEl.appendChild(renderCard(v, { inShelf: true })));
+      };
+
       const renderLibrary = () => {
         const matches = selectedGenres.size === 0
           ? libraryCache
@@ -4323,6 +4487,7 @@
               (v.genres || []).some((g) => selectedGenres.has(g))
             );
         gridEl.innerHTML = '';
+        renderContinueShelf();
         if (!libraryCache.length) {
           libraryEmpty.style.display = 'flex';
           gridEl.style.display = 'none';
