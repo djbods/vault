@@ -1529,115 +1529,485 @@
         transition: width 0.3s ease;
       }
 
-      /* Player modal */
+      /* ----- Player modal -----
+         A custom Netflix-style player chrome that auto-hides during
+         playback. The native <video> controls are off; everything visible
+         is in `.player-overlay`. */
       .player-modal {
-        background: rgba(0, 0, 0, 0.96);
-        padding: 24px;
+        background: #000;
+        padding: 0;
         align-items: stretch;
-        justify-content: center;
+        justify-content: stretch;
       }
 
-      .player-wrap {
-        width: min(90vw, 1600px);
-        max-width: 100%;
-        margin: 0 auto;
+      .player-shell {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        background: #000;
+        overflow: hidden;
+        /* Hide system cursor when the overlay is auto-hidden. */
+      }
+
+      .player-shell[data-idle='true'] {
+        cursor: none;
+      }
+
+      .player-shell video {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        background: #000;
+        display: block;
+      }
+
+      .player-tap {
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+      }
+
+      .player-overlay {
+        position: absolute;
+        inset: 0;
+        z-index: 3;
         display: flex;
         flex-direction: column;
-        gap: 14px;
-        position: relative;
-        min-height: 0;
-        flex: 1 1 auto;
+        justify-content: space-between;
+        pointer-events: none;
+        opacity: 1;
+        transition: opacity 0.3s ease;
+        background:
+          linear-gradient(to bottom, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0) 18%, rgba(0, 0, 0, 0) 60%, rgba(0, 0, 0, 0.7) 100%);
       }
 
-      .player-chrome {
-        flex: 0 0 auto;
+      .player-shell[data-idle='true'] .player-overlay {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .player-overlay > * {
+        pointer-events: auto;
+      }
+
+      /* Top bar — title left, close right. */
+      .player-top {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 16px;
+        padding: 28px 36px 0;
       }
 
       .player-title {
         font-family: 'Playfair Display', serif;
-        font-size: 20px;
+        font-size: 22px;
         font-weight: 400;
         color: var(--text);
-        letter-spacing: 0.05em;
+        letter-spacing: 0.04em;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
         min-width: 0;
         flex: 1 1 auto;
+        text-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
       }
 
-      .player-controls {
-        display: flex;
-        gap: 10px;
-        flex: 0 0 auto;
-        position: relative;
-      }
-
-      .player-stage {
-        flex: 1 1 auto;
-        min-height: 0;
+      /* Center play/pause button — only visible when paused. */
+      .player-center-btn {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 96px;
+        height: 96px;
+        border-radius: 50%;
+        background: rgba(0, 0, 0, 0.55);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        color: var(--text);
+        cursor: pointer;
         display: flex;
         align-items: center;
         justify-content: center;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.25s ease, transform 0.25s ease, background 0.2s ease;
       }
 
-      .player-wrap video {
+      .player-shell[data-state='paused'] .player-center-btn,
+      .player-shell[data-state='ended'] .player-center-btn {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      .player-center-btn:hover {
+        background: rgba(212, 160, 74, 0.18);
+        color: var(--gold-soft);
+      }
+
+      .player-center-btn svg {
+        width: 44px;
+        height: 44px;
+      }
+
+      .player-shell[data-state='paused'] .player-center-btn .icon-pause,
+      .player-shell[data-state='ended'] .player-center-btn .icon-pause,
+      .player-shell[data-state='playing'] .player-center-btn .icon-play {
+        display: none;
+      }
+
+      /* Buffering spinner — only while readyState is low. */
+      .player-spinner {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 56px;
+        height: 56px;
+        z-index: 2;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.15s ease;
+      }
+
+      .player-shell[data-buffering='true'] .player-spinner {
+        opacity: 1;
+      }
+
+      .player-spinner-ring {
         width: 100%;
         height: 100%;
-        max-height: 100%;
-        object-fit: contain;
-        background: #000;
-        border-radius: 2px;
-        box-shadow: 0 40px 120px rgba(0, 0, 0, 0.8);
+        border: 3px solid rgba(255, 255, 255, 0.18);
+        border-top-color: var(--gold);
+        border-radius: 50%;
+        animation: player-spin 0.9s linear infinite;
       }
 
-      .player-btn {
-        background: transparent;
-        border: 1px solid var(--border);
-        color: var(--text-dim);
+      @keyframes player-spin {
+        to { transform: rotate(360deg); }
+      }
+
+      /* Tap-feedback skip indicators (mobile double-tap). */
+      .player-skip-indicator {
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 100px;
+        height: 100px;
+        border-radius: 50%;
+        background: rgba(0, 0, 0, 0.55);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        color: var(--text);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        z-index: 2;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.18s ease;
+      }
+
+      .player-skip-indicator.show {
+        opacity: 1;
+        animation: player-skip-pulse 0.6s ease-out;
+      }
+
+      @keyframes player-skip-pulse {
+        0%   { transform: translateY(-50%) scale(0.85); }
+        40%  { transform: translateY(-50%) scale(1); }
+        100% { transform: translateY(-50%) scale(0.95); }
+      }
+
+      .player-skip-indicator--left  { left: 18%; }
+      .player-skip-indicator--right { right: 18%; }
+      .player-skip-indicator svg    { width: 28px; height: 28px; }
+      .player-skip-indicator span   {
         font-family: 'DM Sans', sans-serif;
         font-size: 11px;
         letter-spacing: 0.3em;
         text-transform: uppercase;
-        padding: 10px 18px;
+      }
+
+      /* Bottom area — scrub bar + controls row. */
+      .player-bottom {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 0 36px 26px;
+      }
+
+      /* ----- Scrub bar -----
+         A short visible track, but a generous hit-area pad above so the
+         pointer can engage from a sloppy click. The bar grows on hover for
+         that Netflix scrubbing feel. */
+      .player-scrub {
+        position: relative;
+        width: 100%;
         cursor: pointer;
-        transition: all 0.3s ease;
+        user-select: none;
+        touch-action: none;
+      }
+
+      .player-scrub-hit {
+        position: relative;
+        height: 22px;
+        display: flex;
+        align-items: center;
+      }
+
+      .player-scrub-track {
+        position: relative;
+        width: 100%;
+        height: 4px;
+        background: rgba(255, 255, 255, 0.16);
+        border-radius: 2px;
+        overflow: visible;
+        transition: height 0.18s ease;
+      }
+
+      .player-scrub:hover .player-scrub-track,
+      .player-scrub.is-scrubbing .player-scrub-track {
+        height: 7px;
+      }
+
+      .player-scrub-buffer,
+      .player-scrub-hover,
+      .player-scrub-progress {
+        position: absolute;
+        top: 0;
+        left: 0;
+        height: 100%;
+        border-radius: 2px;
+        pointer-events: none;
+      }
+
+      .player-scrub-buffer {
+        background: rgba(255, 255, 255, 0.22);
+        width: 0;
+      }
+
+      .player-scrub-hover {
+        background: rgba(255, 255, 255, 0.14);
+        width: 0;
+        opacity: 0;
+        transition: opacity 0.15s ease;
+      }
+
+      .player-scrub:hover .player-scrub-hover,
+      .player-scrub.is-scrubbing .player-scrub-hover {
+        opacity: 1;
+      }
+
+      .player-scrub-progress {
+        background: var(--gold);
+        width: 0;
+        box-shadow: 0 0 8px rgba(212, 160, 74, 0.35);
+      }
+
+      .player-scrub-thumb {
+        position: absolute;
+        top: 50%;
+        left: 0;
+        width: 14px;
+        height: 14px;
+        background: var(--gold);
+        border-radius: 50%;
+        transform: translate(-50%, -50%) scale(0);
+        transition: transform 0.18s ease;
+        pointer-events: none;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+      }
+
+      .player-scrub:hover .player-scrub-thumb,
+      .player-scrub.is-scrubbing .player-scrub-thumb {
+        transform: translate(-50%, -50%) scale(1);
+      }
+
+      .player-scrub-tooltip {
+        position: absolute;
+        bottom: calc(100% + 8px);
+        transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: var(--text);
+        font-family: 'DM Sans', sans-serif;
+        font-size: 12px;
+        letter-spacing: 0.05em;
+        padding: 5px 10px;
+        border-radius: 3px;
         white-space: nowrap;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.15s ease;
       }
 
-      .player-btn:hover {
-        color: var(--gold);
-        border-color: var(--gold);
+      .player-scrub.is-hovered .player-scrub-tooltip,
+      .player-scrub.is-scrubbing .player-scrub-tooltip {
+        opacity: 1;
       }
 
-      .player-btn[hidden] {
+      /* ----- Controls row ----- */
+      .player-controls-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+      }
+
+      .player-controls-left,
+      .player-controls-right {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        position: relative;
+      }
+
+      .player-icon-btn {
+        background: transparent;
+        border: none;
+        color: var(--text);
+        width: 40px;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        border-radius: 4px;
+        transition: color 0.18s ease, background 0.18s ease, transform 0.15s ease;
+        padding: 0;
+      }
+
+      .player-icon-btn svg {
+        width: 24px;
+        height: 24px;
+      }
+
+      .player-icon-btn--lg svg {
+        width: 28px;
+        height: 28px;
+      }
+
+      .player-icon-btn:hover {
+        color: var(--gold-soft);
+        background: rgba(255, 255, 255, 0.06);
+      }
+
+      .player-icon-btn:active {
+        transform: scale(0.94);
+      }
+
+      .player-icon-btn[hidden] {
         display: none;
       }
 
-      .player-btn.active {
+      .player-icon-btn.active {
         color: var(--gold);
-        border-color: var(--gold);
-        background: rgba(212, 160, 74, 0.08);
       }
 
+      /* Play/pause icon swap driven by data-state on the shell. */
+      .player-shell[data-state='playing'] #playerPlay .icon-play,
+      .player-shell[data-state='paused']  #playerPlay .icon-pause,
+      .player-shell[data-state='ended']   #playerPlay .icon-pause {
+        display: none;
+      }
+
+      /* Volume icon swap driven by data-vol on the shell. */
+      .player-shell[data-vol='high'] #playerMute .icon-vol-low,
+      .player-shell[data-vol='high'] #playerMute .icon-vol-mute,
+      .player-shell[data-vol='low']  #playerMute .icon-vol-high,
+      .player-shell[data-vol='low']  #playerMute .icon-vol-mute,
+      .player-shell[data-vol='mute'] #playerMute .icon-vol-high,
+      .player-shell[data-vol='mute'] #playerMute .icon-vol-low {
+        display: none;
+      }
+
+      /* Fullscreen icon swap. */
+      .player-shell:not([data-fullscreen='true']) #playerFs .icon-fs-exit,
+      .player-shell[data-fullscreen='true'] #playerFs .icon-fs-enter {
+        display: none;
+      }
+
+      /* Volume slider — only revealed on hover of the volume cluster. */
+      .player-volume {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .player-volume-slider {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 0;
+        height: 4px;
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 2px;
+        outline: none;
+        opacity: 0;
+        transition: width 0.25s ease, opacity 0.2s ease, margin 0.25s ease;
+        margin: 0;
+      }
+
+      .player-volume:hover .player-volume-slider,
+      .player-volume-slider:focus-visible {
+        width: 90px;
+        opacity: 1;
+        margin: 0 6px 0 2px;
+      }
+
+      .player-volume-slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 12px;
+        height: 12px;
+        background: var(--gold);
+        border-radius: 50%;
+        cursor: pointer;
+        border: none;
+      }
+
+      .player-volume-slider::-moz-range-thumb {
+        width: 12px;
+        height: 12px;
+        background: var(--gold);
+        border-radius: 50%;
+        cursor: pointer;
+        border: none;
+      }
+
+      .player-time {
+        font-family: 'DM Sans', sans-serif;
+        font-size: 13px;
+        color: var(--text);
+        letter-spacing: 0.04em;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-variant-numeric: tabular-nums;
+        margin-left: 4px;
+      }
+
+      .player-time-sep {
+        opacity: 0.45;
+      }
+
+      /* Subtitle menu — anchored above the CC button. */
       .sub-menu {
         position: absolute;
-        top: calc(100% + 8px);
+        bottom: calc(100% + 14px);
         right: 0;
-        min-width: 180px;
-        background: var(--bg-elevated);
+        min-width: 200px;
+        background: rgba(15, 14, 18, 0.96);
         border: 1px solid var(--border-strong);
-        border-radius: 3px;
+        border-radius: 4px;
         padding: 6px;
         display: none;
         flex-direction: column;
         gap: 2px;
         z-index: 5;
         box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+        backdrop-filter: blur(8px);
       }
 
       .sub-menu.open {
@@ -1649,8 +2019,8 @@
         border: none;
         color: var(--text-dim);
         font-family: 'DM Sans', sans-serif;
-        font-size: 11px;
-        letter-spacing: 0.25em;
+        font-size: 12px;
+        letter-spacing: 0.18em;
         text-transform: uppercase;
         padding: 10px 14px;
         text-align: left;
@@ -1667,6 +2037,21 @@
       .sub-menu-item.active {
         color: var(--gold);
         background: rgba(212, 160, 74, 0.1);
+      }
+
+      /* Phone tweaks — shrink the chrome and hide rarely-used buttons inline. */
+      @media (max-width: 720px) {
+        .player-top { padding: 18px 18px 0; }
+        .player-bottom { padding: 0 16px 18px; gap: 8px; }
+        .player-title { font-size: 16px; }
+        .player-controls-left,
+        .player-controls-right { gap: 4px; }
+        .player-icon-btn { width: 36px; height: 36px; }
+        .player-icon-btn svg { width: 22px; height: 22px; }
+        .player-time { font-size: 12px; }
+        /* Volume always hidden on phones — system volume keys are fine. */
+        .player-volume { display: none; }
+        .player-skip-indicator { width: 84px; height: 84px; }
       }
 
       /* Tablet — keep hover-expand but tighten card width so we fit three
@@ -1961,19 +2346,138 @@
 
     <!-- Player modal -->
     <div class="modal player-modal" id="playerModal">
-      <div class="player-wrap">
-        <div class="player-chrome">
-          <div class="player-title" id="playerTitle"></div>
-          <div class="player-controls">
-            <button class="player-btn" id="playerCC" type="button" hidden aria-haspopup="menu" aria-expanded="false">CC</button>
-            <div class="sub-menu" id="subMenu" role="menu"></div>
-            <button class="player-btn" id="playerPip" type="button" hidden aria-pressed="false" title="Picture in picture">PiP</button>
-            <button class="player-btn" id="playerAirplay" type="button" hidden title="AirPlay">AirPlay</button>
-            <button class="player-btn" data-close="playerModal" type="button">Close · Esc</button>
-          </div>
+      <div class="player-shell" id="playerShell" data-state="paused">
+        <video id="player" playsinline crossorigin="anonymous" x-webkit-airplay="allow"></video>
+
+        <!-- Tap surface for mobile gestures (double-tap zones live in JS) -->
+        <div class="player-tap" id="playerTap"></div>
+
+        <!-- Buffering spinner -->
+        <div class="player-spinner" id="playerSpinner" aria-hidden="true">
+          <div class="player-spinner-ring"></div>
         </div>
-        <div class="player-stage">
-          <video id="player" controls playsinline crossorigin="anonymous" x-webkit-airplay="allow"></video>
+
+        <!-- Tap-feedback skip indicators (mobile double-tap) -->
+        <div class="player-skip-indicator player-skip-indicator--left" id="playerSkipBack" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M11 17l-5-5 5-5"/><path d="M18 17l-5-5 5-5"/>
+          </svg>
+          <span>10s</span>
+        </div>
+        <div class="player-skip-indicator player-skip-indicator--right" id="playerSkipFwd" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M13 17l5-5-5-5"/><path d="M6 17l5-5-5-5"/>
+          </svg>
+          <span>10s</span>
+        </div>
+
+        <!-- Overlay (top bar + bottom controls). Hides itself after 3s of inactivity. -->
+        <div class="player-overlay" id="playerOverlay">
+          <div class="player-top">
+            <div class="player-title" id="playerTitle"></div>
+            <button class="player-icon-btn player-icon-btn--lg" data-close="playerModal" type="button" title="Close (Esc)" aria-label="Close">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6 6l12 12M18 6 6 18"/>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Center: big play/pause indicator. Hidden during playback. -->
+          <button class="player-center-btn" id="playerCenterBtn" type="button" aria-label="Play/Pause">
+            <svg class="icon-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            <svg class="icon-pause" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+          </button>
+
+          <div class="player-bottom">
+            <!-- Scrub bar -->
+            <div class="player-scrub" id="playerScrub">
+              <div class="player-scrub-hit">
+                <div class="player-scrub-track">
+                  <div class="player-scrub-buffer" id="playerBuffer"></div>
+                  <div class="player-scrub-hover" id="playerScrubHover"></div>
+                  <div class="player-scrub-progress" id="playerProgress"></div>
+                  <div class="player-scrub-thumb" id="playerThumb"></div>
+                </div>
+                <div class="player-scrub-tooltip" id="playerTooltip">0:00</div>
+              </div>
+            </div>
+
+            <div class="player-controls-row">
+              <div class="player-controls-left">
+                <button class="player-icon-btn" id="playerPlay" type="button" aria-label="Play/Pause" title="Play/Pause (Space)">
+                  <svg class="icon-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                  <svg class="icon-pause" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+                </button>
+                <button class="player-icon-btn" id="playerBack10" type="button" aria-label="Back 10 seconds" title="Back 10s (←)">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 12a9 9 0 1 0 3-6.7"/>
+                    <path d="M3 4v5h5"/>
+                    <text x="12" y="15.5" font-size="7" font-weight="600" fill="currentColor" stroke="none" text-anchor="middle" font-family="DM Sans, sans-serif">10</text>
+                  </svg>
+                </button>
+                <button class="player-icon-btn" id="playerFwd10" type="button" aria-label="Forward 10 seconds" title="Forward 10s (→)">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 12a9 9 0 1 1-3-6.7"/>
+                    <path d="M21 4v5h-5"/>
+                    <text x="12" y="15.5" font-size="7" font-weight="600" fill="currentColor" stroke="none" text-anchor="middle" font-family="DM Sans, sans-serif">10</text>
+                  </svg>
+                </button>
+                <div class="player-volume" id="playerVolume">
+                  <button class="player-icon-btn" id="playerMute" type="button" aria-label="Mute" title="Mute (m)">
+                    <svg class="icon-vol-high" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M4 9v6h4l5 4V5L8 9H4z"/>
+                      <path d="M16 8a5 5 0 0 1 0 8"/>
+                      <path d="M19 5a9 9 0 0 1 0 14"/>
+                    </svg>
+                    <svg class="icon-vol-low" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M4 9v6h4l5 4V5L8 9H4z"/>
+                      <path d="M16 8a5 5 0 0 1 0 8"/>
+                    </svg>
+                    <svg class="icon-vol-mute" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M4 9v6h4l5 4V5L8 9H4z"/>
+                      <path d="M22 9l-6 6M16 9l6 6"/>
+                    </svg>
+                  </button>
+                  <input type="range" class="player-volume-slider" id="playerVolSlider" min="0" max="1" step="0.01" value="1" aria-label="Volume"/>
+                </div>
+                <div class="player-time">
+                  <span id="playerCurrent">0:00</span>
+                  <span class="player-time-sep">/</span>
+                  <span id="playerDuration">0:00</span>
+                </div>
+              </div>
+
+              <div class="player-controls-right">
+                <button class="player-icon-btn" id="playerCC" type="button" hidden aria-haspopup="menu" aria-expanded="false" title="Subtitles (c)" aria-label="Subtitles">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="5" width="18" height="14" rx="2"/>
+                    <path d="M7 13h3M14 13h3M7 16h2M12 16h5"/>
+                  </svg>
+                </button>
+                <div class="sub-menu" id="subMenu" role="menu"></div>
+                <button class="player-icon-btn" id="playerPip" type="button" hidden aria-pressed="false" title="Picture in picture (i)" aria-label="Picture in picture">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="5" width="18" height="14" rx="2"/>
+                    <rect x="12" y="11" width="7" height="6" rx="1" fill="currentColor"/>
+                  </svg>
+                </button>
+                <button class="player-icon-btn" id="playerAirplay" type="button" hidden title="AirPlay" aria-label="AirPlay">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M5 17h-1a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-1"/>
+                    <path d="M8 21l4-5 4 5z" fill="currentColor"/>
+                  </svg>
+                </button>
+                <button class="player-icon-btn" id="playerFs" type="button" title="Fullscreen (f)" aria-label="Fullscreen">
+                  <svg class="icon-fs-enter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>
+                  </svg>
+                  <svg class="icon-fs-exit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -2002,6 +2506,26 @@
       const subMenu = document.getElementById('subMenu');
       const playerPip = document.getElementById('playerPip');
       const playerAirplay = document.getElementById('playerAirplay');
+      const playerShell = document.getElementById('playerShell');
+      const playerOverlay = document.getElementById('playerOverlay');
+      const playerTap = document.getElementById('playerTap');
+      const playerCenterBtn = document.getElementById('playerCenterBtn');
+      const playerPlayBtn = document.getElementById('playerPlay');
+      const playerBack10 = document.getElementById('playerBack10');
+      const playerFwd10 = document.getElementById('playerFwd10');
+      const playerMute = document.getElementById('playerMute');
+      const playerVolSlider = document.getElementById('playerVolSlider');
+      const playerCurrent = document.getElementById('playerCurrent');
+      const playerDuration = document.getElementById('playerDuration');
+      const playerFs = document.getElementById('playerFs');
+      const playerScrub = document.getElementById('playerScrub');
+      const playerBuffer = document.getElementById('playerBuffer');
+      const playerProgress = document.getElementById('playerProgress');
+      const playerScrubHover = document.getElementById('playerScrubHover');
+      const playerThumb = document.getElementById('playerThumb');
+      const playerTooltip = document.getElementById('playerTooltip');
+      const playerSkipBack = document.getElementById('playerSkipBack');
+      const playerSkipFwd = document.getElementById('playerSkipFwd');
       const dropzone = document.getElementById('dropzone');
       const dropzoneText = document.getElementById('dropzoneText');
       const dropzoneSub = document.getElementById('dropzoneSub');
@@ -2130,20 +2654,7 @@
       const openModal = (el) => el.classList.add('active');
       const closeModal = (el) => {
         el.classList.remove('active');
-        if (el === playerModal) {
-          if (document.pictureInPictureElement === playerEl) {
-            document.exitPictureInPicture().catch(() => {});
-          }
-          playerEl.pause();
-          // Strip <track> elements + src so the next open starts clean
-          playerEl.querySelectorAll('track').forEach((t) => t.remove());
-          playerEl.removeAttribute('src');
-          playerEl.load();
-          playerCC.hidden = true;
-          playerCC.classList.remove('active');
-          closeSubMenu();
-          subMenu.innerHTML = '';
-        }
+        if (el === playerModal) resetPlayer();
         if (el === uploadModal) resetUploadModal();
       };
 
@@ -2719,13 +3230,6 @@
         await setWatched(editing.videoName, next);
       });
 
-      // Auto-mark the current library file as watched the moment playback
-      // reaches the end. No-op for torrents (currentLocalVideo is cleared
-      // in playTorrent).
-      playerEl.addEventListener('ended', () => {
-        if (currentLocalVideo) setWatched(currentLocalVideo, true);
-      });
-
       editReprocess.addEventListener('click', async () => {
         if (!editing) return;
         if (!confirm('Re-process this video?\n\nThis re-encodes audio if needed and extracts embedded subtitles. It can take a while for large files.')) return;
@@ -2883,7 +3387,13 @@
         card.addEventListener('mouseleave', stop);
       };
 
-      // ---- Player + subtitles
+      // ---- Custom player
+      //
+      // Replaces the stock <video controls> chrome. The visible UI is the
+      // `.player-overlay` in HTML; this script wires every button + the
+      // scrub bar to the underlying <video>, drives the play-state classes
+      // on `.player-shell`, auto-hides during playback, and persists a
+      // resume position to the metadata sidecar every few seconds.
       const LANG_LABELS = {
         en: 'English', es: 'Spanish', fr: 'French', de: 'German', it: 'Italian',
         pt: 'Portuguese', nl: 'Dutch', sv: 'Swedish', no: 'Norwegian', da: 'Danish',
@@ -2895,8 +3405,24 @@
       const labelForLang = (code) =>
         LANG_LABELS[(code || '').toLowerCase()] || (code || 'CC').toUpperCase();
 
-      let activeTrackIndex = -1; // -1 means "Off"
+      const formatTime = (sec) => {
+        if (!Number.isFinite(sec) || sec < 0) return '0:00';
+        const s = Math.floor(sec % 60);
+        const m = Math.floor((sec / 60) % 60);
+        const h = Math.floor(sec / 3600);
+        const pad = (n) => String(n).padStart(2, '0');
+        return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+      };
 
+      // The file currently in the player. Local videos can resume + auto-mark
+      // watched; torrents do neither. Cleared on close.
+      let currentLocalVideo = null;
+      let activeTrackIndex = -1; // -1 = Off
+      let resumeApplied = false; // set after the seek-to-resume happens
+      let watchedFiredAt = 0;    // de-dup the 95% auto-watched call
+      let resumeSaveTimer = null;
+
+      // ---- Subtitle menu
       const closeSubMenu = () => {
         subMenu.classList.remove('open');
         playerCC.setAttribute('aria-expanded', 'false');
@@ -2931,6 +3457,9 @@
           tracks[i].mode = i === idx ? 'showing' : 'disabled';
         }
         playerCC.classList.toggle('active', idx >= 0);
+        // Re-render so the active dot follows the new selection.
+        const items = subMenu.querySelectorAll('.sub-menu-item');
+        items.forEach((el, i) => el.classList.toggle('active', (i - 1) === idx));
       };
 
       const applySubtitles = (tracks) => {
@@ -2953,7 +3482,6 @@
         });
         playerCC.hidden = false;
         renderSubMenu(tracks);
-        // Default OFF — force all tracks disabled after the browser loads them.
         const disableAll = () => {
           for (const tr of playerEl.textTracks) tr.mode = 'disabled';
         };
@@ -2966,6 +3494,7 @@
         if (!playerEl.textTracks.length) return;
         const isOpen = subMenu.classList.toggle('open');
         playerCC.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        scheduleHideOverlay(true); // keep overlay open while menu is up
       });
 
       document.addEventListener('click', (e) => {
@@ -2973,6 +3502,284 @@
         if (e.target.closest('#subMenu') || e.target.closest('#playerCC')) return;
         closeSubMenu();
       });
+
+      // ---- Play / pause + state
+      const togglePlayPause = () => {
+        if (playerEl.paused || playerEl.ended) playerEl.play().catch(() => {});
+        else playerEl.pause();
+      };
+
+      const setPlayState = () => {
+        const state = playerEl.ended ? 'ended' : playerEl.paused ? 'paused' : 'playing';
+        playerShell.dataset.state = state;
+        playerPlayBtn.setAttribute('aria-label', state === 'playing' ? 'Pause' : 'Play');
+        playerCenterBtn.setAttribute('aria-label', state === 'playing' ? 'Pause' : 'Play');
+      };
+
+      playerPlayBtn.addEventListener('click', togglePlayPause);
+      playerCenterBtn.addEventListener('click', togglePlayPause);
+
+      playerEl.addEventListener('play', () => { setPlayState(); scheduleHideOverlay(); });
+      playerEl.addEventListener('pause', () => { setPlayState(); showOverlay(); });
+      playerEl.addEventListener('ended', () => {
+        setPlayState();
+        showOverlay();
+        if (currentLocalVideo) setWatched(currentLocalVideo, true);
+      });
+
+      // ---- Seek by N seconds (skip buttons + keyboard + double-tap)
+      const seekBy = (delta) => {
+        if (!Number.isFinite(playerEl.duration)) return;
+        playerEl.currentTime = Math.min(
+          playerEl.duration,
+          Math.max(0, playerEl.currentTime + delta),
+        );
+      };
+      playerBack10.addEventListener('click', () => seekBy(-10));
+      playerFwd10.addEventListener('click', () => seekBy(10));
+
+      // ---- Volume
+      const setMute = (muted) => {
+        playerEl.muted = muted;
+        if (!muted && playerEl.volume === 0) playerEl.volume = 0.5;
+        updateVolumeUI();
+      };
+
+      const updateVolumeUI = () => {
+        const v = playerEl.muted ? 0 : playerEl.volume;
+        playerVolSlider.value = String(v);
+        playerShell.dataset.vol = v === 0 ? 'mute' : v < 0.5 ? 'low' : 'high';
+        playerMute.setAttribute('aria-label', v === 0 ? 'Unmute' : 'Mute');
+      };
+
+      playerMute.addEventListener('click', () => setMute(!playerEl.muted));
+      playerVolSlider.addEventListener('input', () => {
+        playerEl.volume = parseFloat(playerVolSlider.value) || 0;
+        playerEl.muted = playerEl.volume === 0;
+        updateVolumeUI();
+      });
+      playerEl.addEventListener('volumechange', updateVolumeUI);
+
+      // ---- Scrub bar
+      // Pointer-events so it works for mouse and touch (and respects pen).
+      // While scrubbing we pause+resume so the audio doesn't stutter through
+      // every dragged frame.
+      let scrubbing = false;
+      let scrubResume = false;
+
+      const scrubPositionFromEvent = (e) => {
+        const rect = playerScrub.getBoundingClientRect();
+        const x = Math.min(rect.right, Math.max(rect.left, e.clientX));
+        return (x - rect.left) / rect.width;
+      };
+
+      const updateTooltipForRatio = (ratio) => {
+        if (!Number.isFinite(playerEl.duration)) return;
+        const rect = playerScrub.getBoundingClientRect();
+        const time = ratio * playerEl.duration;
+        playerTooltip.textContent = formatTime(time);
+        const half = playerTooltip.offsetWidth / 2;
+        const minLeft = half + 6;
+        const maxLeft = rect.width - half - 6;
+        const clamped = Math.min(maxLeft, Math.max(minLeft, ratio * rect.width));
+        playerTooltip.style.left = `${clamped}px`;
+      };
+
+      playerScrub.addEventListener('pointermove', (e) => {
+        if (!Number.isFinite(playerEl.duration)) return;
+        const ratio = scrubPositionFromEvent(e);
+        playerScrub.classList.add('is-hovered');
+        playerScrubHover.style.width = `${ratio * 100}%`;
+        updateTooltipForRatio(ratio);
+      });
+
+      playerScrub.addEventListener('pointerleave', () => {
+        if (!scrubbing) playerScrub.classList.remove('is-hovered');
+      });
+
+      playerScrub.addEventListener('pointerdown', (e) => {
+        if (!Number.isFinite(playerEl.duration)) return;
+        scrubbing = true;
+        scrubResume = !playerEl.paused;
+        if (scrubResume) playerEl.pause();
+        playerScrub.classList.add('is-scrubbing');
+        playerScrub.setPointerCapture(e.pointerId);
+        const ratio = scrubPositionFromEvent(e);
+        playerEl.currentTime = ratio * playerEl.duration;
+        updateTooltipForRatio(ratio);
+        // Keep overlay open while scrubbing.
+        scheduleHideOverlay(true);
+      });
+
+      playerScrub.addEventListener('pointermove', (e) => {
+        if (!scrubbing) return;
+        const ratio = scrubPositionFromEvent(e);
+        playerEl.currentTime = ratio * playerEl.duration;
+        updateTooltipForRatio(ratio);
+      });
+
+      const endScrub = (e) => {
+        if (!scrubbing) return;
+        scrubbing = false;
+        playerScrub.classList.remove('is-scrubbing');
+        try { playerScrub.releasePointerCapture(e.pointerId); } catch {}
+        if (scrubResume) playerEl.play().catch(() => {});
+        scrubResume = false;
+        scheduleHideOverlay();
+      };
+      playerScrub.addEventListener('pointerup', endScrub);
+      playerScrub.addEventListener('pointercancel', endScrub);
+
+      // ---- Time + buffer display
+      playerEl.addEventListener('loadedmetadata', () => {
+        playerDuration.textContent = formatTime(playerEl.duration);
+        updateProgress();
+      });
+
+      const updateProgress = () => {
+        const d = playerEl.duration;
+        if (!Number.isFinite(d) || d <= 0) {
+          playerProgress.style.width = '0%';
+          playerThumb.style.left = '0%';
+          return;
+        }
+        const pct = (playerEl.currentTime / d) * 100;
+        playerProgress.style.width = `${pct}%`;
+        playerThumb.style.left = `${pct}%`;
+        playerCurrent.textContent = formatTime(playerEl.currentTime);
+      };
+
+      const updateBuffer = () => {
+        const d = playerEl.duration;
+        if (!Number.isFinite(d) || d <= 0 || !playerEl.buffered.length) {
+          playerBuffer.style.width = '0%';
+          return;
+        }
+        // Show the buffered range that contains the current playhead.
+        let end = 0;
+        for (let i = 0; i < playerEl.buffered.length; i++) {
+          if (
+            playerEl.buffered.start(i) <= playerEl.currentTime &&
+            playerEl.buffered.end(i) > end
+          ) {
+            end = playerEl.buffered.end(i);
+          }
+        }
+        playerBuffer.style.width = `${(end / d) * 100}%`;
+      };
+
+      playerEl.addEventListener('timeupdate', () => {
+        updateProgress();
+        updateBuffer();
+        maybeSaveResume();
+        maybeMarkWatched();
+      });
+      playerEl.addEventListener('progress', updateBuffer);
+      playerEl.addEventListener('seeked', updateBuffer);
+
+      // ---- Buffering spinner
+      playerEl.addEventListener('waiting', () => { playerShell.dataset.buffering = 'true'; });
+      playerEl.addEventListener('playing', () => { playerShell.dataset.buffering = 'false'; });
+      playerEl.addEventListener('canplay',  () => { playerShell.dataset.buffering = 'false'; });
+
+      // ---- Auto-hide overlay
+      let hideTimer = null;
+      const showOverlay = () => {
+        playerShell.dataset.idle = 'false';
+      };
+      const hideOverlayNow = () => {
+        // Don't hide while paused / ended, or while a menu is open.
+        if (playerEl.paused || playerEl.ended) return;
+        if (subMenu.classList.contains('open')) return;
+        playerShell.dataset.idle = 'true';
+      };
+      const scheduleHideOverlay = (keepOpen = false) => {
+        showOverlay();
+        if (hideTimer) clearTimeout(hideTimer);
+        if (keepOpen) return;
+        hideTimer = setTimeout(hideOverlayNow, 3000);
+      };
+
+      ['pointermove', 'pointerdown', 'touchstart'].forEach((ev) => {
+        playerShell.addEventListener(ev, () => scheduleHideOverlay());
+      });
+      playerOverlay.addEventListener('pointermove', () => scheduleHideOverlay(true));
+      playerOverlay.addEventListener('pointerleave', () => scheduleHideOverlay());
+
+      // ---- Tap to toggle play (desktop click on stage)
+      // Single click on the bare stage toggles play/pause. Double-click goes
+      // fullscreen on desktop, while double-tap on mobile triggers ±10s skip
+      // (handled separately below).
+      let tapClickTimer = null;
+      const isTouchDevice = () => matchMedia('(pointer: coarse)').matches;
+
+      playerTap.addEventListener('click', (e) => {
+        if (isTouchDevice()) return; // mobile uses touch handlers below
+        if (tapClickTimer) {
+          clearTimeout(tapClickTimer);
+          tapClickTimer = null;
+          toggleFullscreen();
+        } else {
+          tapClickTimer = setTimeout(() => {
+            tapClickTimer = null;
+            togglePlayPause();
+          }, 220);
+        }
+      });
+
+      // ---- Mobile: tap to toggle overlay, double-tap left/right to skip
+      let lastTapAt = 0;
+      let lastTapX = 0;
+      playerTap.addEventListener('touchend', (e) => {
+        if (e.changedTouches.length !== 1) return;
+        const t = e.changedTouches[0];
+        const now = performance.now();
+        const dx = Math.abs(t.clientX - lastTapX);
+        const dt = now - lastTapAt;
+        if (dt < 350 && dx < 80) {
+          // Double-tap — skip ±10s based on which half of the screen
+          const rect = playerShell.getBoundingClientRect();
+          const isLeft = t.clientX - rect.left < rect.width / 2;
+          seekBy(isLeft ? -10 : 10);
+          (isLeft ? playerSkipBack : playerSkipFwd).classList.remove('show');
+          // Restart the animation by reading offsetWidth between toggles.
+          void (isLeft ? playerSkipBack : playerSkipFwd).offsetWidth;
+          (isLeft ? playerSkipBack : playerSkipFwd).classList.add('show');
+          setTimeout(() => {
+            (isLeft ? playerSkipBack : playerSkipFwd).classList.remove('show');
+          }, 600);
+          lastTapAt = 0;
+          e.preventDefault();
+          return;
+        }
+        lastTapAt = now;
+        lastTapX = t.clientX;
+        // Single tap: toggle overlay visibility (Netflix-on-mobile pattern).
+        if (playerShell.dataset.idle === 'true') {
+          scheduleHideOverlay();
+        } else if (!playerEl.paused && !playerEl.ended) {
+          hideOverlayNow();
+        }
+      });
+
+      // ---- Fullscreen
+      const toggleFullscreen = () => {
+        const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+        if (fsEl) {
+          (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+        } else {
+          const req = playerShell.requestFullscreen || playerShell.webkitRequestFullscreen;
+          if (req) req.call(playerShell).catch(() => {});
+          else if (playerEl.webkitEnterFullscreen) playerEl.webkitEnterFullscreen(); // iOS Safari
+        }
+      };
+      playerFs.addEventListener('click', toggleFullscreen);
+      const syncFullscreenState = () => {
+        const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+        playerShell.dataset.fullscreen = fsEl === playerShell ? 'true' : 'false';
+      };
+      document.addEventListener('fullscreenchange', syncFullscreenState);
+      document.addEventListener('webkitfullscreenchange', syncFullscreenState);
 
       // ---- Picture-in-Picture
       if (document.pictureInPictureEnabled && !playerEl.disablePictureInPicture) {
@@ -2999,10 +3806,7 @@
       }
 
       // ---- AirPlay (Safari only)
-      // The picker API is WebKit-prefixed and only exposes targets on macOS /
-      // iOS Safari. We feature-detect both the availability event and the
-      // picker method, then let the availability listener toggle the button
-      // so it only appears when an Apple TV / AirPlay receiver is reachable.
+      // Feature-detect the WebKit-prefixed picker before showing the button.
       if (
         typeof window.WebKitPlaybackTargetAvailabilityEvent !== 'undefined' &&
         typeof playerEl.webkitShowPlaybackTargetPicker === 'function'
@@ -3022,36 +3826,198 @@
         });
       }
 
-      // Tracks which library video the player is currently showing so we
-      // can auto-mark it as watched when the file ends. Cleared when we
-      // play a torrent (auto-mark only applies to library files).
-      let currentLocalVideo = null;
+      // ---- Keyboard shortcuts
+      // Only active while the player modal is open; other modals + plain text
+      // inputs are ignored so typing into the rename / TMDB search inputs
+      // doesn't accidentally seek the player.
+      const isTypingTarget = (el) => {
+        if (!el) return false;
+        const tag = el.tagName;
+        return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable;
+      };
+      document.addEventListener('keydown', (e) => {
+        if (!playerModal.classList.contains('active')) return;
+        if (isTypingTarget(e.target)) return;
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
 
+        const key = e.key;
+        if (key === ' ' || key === 'k' || key === 'K') {
+          e.preventDefault();
+          togglePlayPause();
+        } else if (key === 'ArrowLeft' || key === 'j' || key === 'J') {
+          e.preventDefault();
+          seekBy(e.shiftKey ? -30 : key.toLowerCase() === 'j' ? -10 : -5);
+        } else if (key === 'ArrowRight' || key === 'l' || key === 'L') {
+          e.preventDefault();
+          seekBy(e.shiftKey ? 30 : key.toLowerCase() === 'l' ? 10 : 5);
+        } else if (key === 'ArrowUp') {
+          e.preventDefault();
+          playerEl.volume = Math.min(1, playerEl.volume + 0.05);
+          if (playerEl.muted) playerEl.muted = false;
+        } else if (key === 'ArrowDown') {
+          e.preventDefault();
+          playerEl.volume = Math.max(0, playerEl.volume - 0.05);
+        } else if (key === 'm' || key === 'M') {
+          e.preventDefault();
+          setMute(!playerEl.muted);
+        } else if (key === 'f' || key === 'F') {
+          e.preventDefault();
+          toggleFullscreen();
+        } else if (key === 'c' || key === 'C') {
+          if (playerEl.textTracks.length) {
+            e.preventDefault();
+            // Cycle Off → 0 → 1 → … → Off
+            const next = activeTrackIndex + 1 >= playerEl.textTracks.length ? -1 : activeTrackIndex + 1;
+            selectSubtitle(next);
+          }
+        } else if (key === 'i' || key === 'I') {
+          if (!playerPip.hidden) {
+            e.preventDefault();
+            playerPip.click();
+          }
+        } else if (/^[0-9]$/.test(key) && Number.isFinite(playerEl.duration)) {
+          e.preventDefault();
+          playerEl.currentTime = (parseInt(key, 10) / 10) * playerEl.duration;
+        }
+      });
+
+      // ---- Resume position
+      // Persist current time every ~5s while playing; restore on load.
+      const maybeSaveResume = () => {
+        if (!currentLocalVideo) return;
+        if (!Number.isFinite(playerEl.duration) || playerEl.duration <= 0) return;
+        if (playerEl.paused || playerEl.ended) return;
+        const now = performance.now();
+        if (resumeSaveTimer && now - resumeSaveTimer < 5000) return;
+        resumeSaveTimer = now;
+        // Within 5s of either end — treat as "no resume" (Netflix behaviour).
+        const t = playerEl.currentTime;
+        const nearEnd = t > playerEl.duration - 5;
+        const nearStart = t < 5;
+        const value = (nearEnd || nearStart) ? null : t;
+        fetch(`${API}/videos/${encodeURIComponent(currentLocalVideo)}/metadata`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ resumePosition: value }),
+        }).catch(() => {});
+      };
+
+      const maybeMarkWatched = () => {
+        if (!currentLocalVideo) return;
+        if (!Number.isFinite(playerEl.duration) || playerEl.duration <= 0) return;
+        const ratio = playerEl.currentTime / playerEl.duration;
+        if (ratio < 0.95) return;
+        // De-dup so we don't PATCH on every timeupdate after 95%.
+        const now = performance.now();
+        if (now - watchedFiredAt < 60_000) return;
+        watchedFiredAt = now;
+        setWatched(currentLocalVideo, true);
+      };
+
+      const tryApplyResume = (resumeSec) => {
+        if (resumeApplied) return;
+        if (!Number.isFinite(resumeSec) || resumeSec < 5) return;
+        if (!Number.isFinite(playerEl.duration) || playerEl.duration <= 0) return;
+        // Don't resume if we'd land within 30s of the end.
+        if (resumeSec > playerEl.duration - 30) return;
+        playerEl.currentTime = resumeSec;
+        resumeApplied = true;
+      };
+
+      // ---- Reset on close
+      function resetPlayer() {
+        if (document.pictureInPictureElement === playerEl) {
+          document.exitPictureInPicture().catch(() => {});
+        }
+        if (document.fullscreenElement === playerShell) {
+          (document.exitFullscreen || document.webkitExitFullscreen || (() => {})).call(document);
+        }
+        // Save one final resume position synchronously-ish before we wipe state.
+        if (currentLocalVideo && Number.isFinite(playerEl.duration) && !playerEl.ended) {
+          const t = playerEl.currentTime;
+          const value = (t < 5 || t > playerEl.duration - 5) ? null : t;
+          // Force a save by clearing the debounce.
+          resumeSaveTimer = 0;
+          fetch(`${API}/videos/${encodeURIComponent(currentLocalVideo)}/metadata`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ resumePosition: value }),
+            keepalive: true,
+          }).catch(() => {});
+        }
+        playerEl.pause();
+        playerEl.querySelectorAll('track').forEach((t) => t.remove());
+        playerEl.removeAttribute('src');
+        playerEl.load();
+        playerCC.hidden = true;
+        playerCC.classList.remove('active');
+        closeSubMenu();
+        subMenu.innerHTML = '';
+        playerShell.dataset.state = 'paused';
+        playerShell.dataset.idle = 'false';
+        playerShell.dataset.buffering = 'false';
+        playerProgress.style.width = '0%';
+        playerBuffer.style.width = '0%';
+        playerThumb.style.left = '0%';
+        playerCurrent.textContent = '0:00';
+        playerDuration.textContent = '0:00';
+        currentLocalVideo = null;
+        resumeApplied = false;
+        watchedFiredAt = 0;
+        resumeSaveTimer = null;
+      }
+
+      // ---- Opening the player
       const playLocalVideo = async (filename) => {
         currentLocalVideo = filename;
+        resumeApplied = false;
+        watchedFiredAt = 0;
+        resumeSaveTimer = null;
         playerEl.src = `${API}/stream/${encodeURIComponent(filename)}`;
         playerTitleEl.textContent = cleanName(filename);
         openModal(playerModal);
+        setPlayState();
+        updateVolumeUI();
+        // Subtitles + resume position fetched in parallel.
+        let resumeSec = null;
         try {
-          const res = await fetch(`${API}/subtitles/${encodeURIComponent(filename)}`);
-          const subs = res.ok ? await res.json() : [];
+          const [subRes, listRes] = await Promise.all([
+            fetch(`${API}/subtitles/${encodeURIComponent(filename)}`),
+            fetch(`${API}/videos`),
+          ]);
+          const subs = subRes.ok ? await subRes.json() : [];
           const tracks = subs.map((s) => ({
             url: `${API}${s.url}`,
             label: s.label,
             lang: s.lang,
           }));
           applySubtitles(tracks);
+          if (listRes.ok) {
+            const list = await listRes.json();
+            const v = list.find((x) => x.name === filename);
+            if (v && typeof v.resumePosition === 'number') resumeSec = v.resumePosition;
+          }
         } catch {
           applySubtitles([]);
         }
+        // Apply resume position once metadata is in. `loadedmetadata` may
+        // have fired before we got here, so try once now and once on the
+        // event for safety.
+        const apply = () => tryApplyResume(resumeSec);
+        if (playerEl.readyState >= 1) apply();
+        playerEl.addEventListener('loadedmetadata', apply, { once: true });
         playerEl.play().catch(() => {});
+        scheduleHideOverlay();
       };
 
       const playTorrent = (t) => {
         currentLocalVideo = null;
+        resumeApplied = true; // disable resume for torrents
         playerEl.src = `${API}/torrent/${t.infoHash}/stream`;
         playerTitleEl.textContent = cleanName((t.mainVideo && t.mainVideo.name) || t.name);
         openModal(playerModal);
+        setPlayState();
+        updateVolumeUI();
         const tracks = (t.subtitles || []).map((s) => ({
           url: `${API}/torrent/${t.infoHash}/subtitles/${encodeURIComponent(s.name)}`,
           label: (s.name.match(/\.([a-z]{2,3})\.[^.]+$/i) || [, 'CC'])[1].toUpperCase(),
@@ -3059,7 +4025,11 @@
         }));
         applySubtitles(tracks);
         playerEl.play().catch(() => {});
+        scheduleHideOverlay();
       };
+
+      // Initial volume UI sync (player may load with cached volume).
+      updateVolumeUI();
 
       // ---- Library
       const deleteVideo = async (filename) => {
