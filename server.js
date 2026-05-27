@@ -333,6 +333,9 @@ app.get('/videos', (req, res) => {
           tmdbId: meta.tmdbId || null,
           year: meta.year || null,
           runtime: meta.runtime || null,
+          overview: meta.overview || null,
+          cast: Array.isArray(meta.cast) ? meta.cast : [],
+          director: meta.director || null,
           resumePosition: typeof meta.resumePosition === 'number' ? meta.resumePosition : null,
         };
       })
@@ -1067,24 +1070,42 @@ app.get('/tmdb/search', async (req, res) => {
   }
 });
 
-// Fetch TMDB movie details (resolves genre names + release year). Cached
-// per-id since the data is effectively immutable.
+// Fetch TMDB movie details (resolves genre names + release year + credits).
+// Cached per-id since the data is effectively immutable. `credits` is
+// appended in the same call so we don't pay a second round-trip for the
+// cast / director needed by the detail view.
 const tmdbMovieCache = new Map();
+const TMDB_CAST_LIMIT = 5;
 const fetchTmdbMovieDetails = async (tmdbId) => {
   if (!TMDB_API_KEY) throw new Error('TMDB_API_KEY not configured');
   const id = Number(tmdbId);
   if (!Number.isFinite(id) || id <= 0) throw new Error('Invalid tmdbId');
   if (tmdbMovieCache.has(id)) return tmdbMovieCache.get(id);
   const r = await fetch(
-    `https://api.themoviedb.org/3/movie/${id}?api_key=${TMDB_API_KEY}&language=en-US`
+    `https://api.themoviedb.org/3/movie/${id}?api_key=${TMDB_API_KEY}&language=en-US&append_to_response=credits`
   );
   if (!r.ok) throw new Error(`TMDB ${r.status}`);
   const data = await r.json();
+  const credits = data.credits || {};
+  const castList = Array.isArray(credits.cast) ? credits.cast : [];
+  const crewList = Array.isArray(credits.crew) ? credits.crew : [];
+  // TMDB returns cast in billed order; first N are the top-billed names.
+  const cast = castList
+    .slice(0, TMDB_CAST_LIMIT)
+    .map((c) => c.name)
+    .filter(Boolean);
+  // For multi-director films keep the first credited director — the detail
+  // view shows a single name, and TMDB orders crew by department then
+  // billing so the lead director comes first.
+  const director = (crewList.find((c) => c.job === 'Director') || {}).name || null;
   const result = {
     tmdbId: id,
     year: data.release_date ? data.release_date.slice(0, 4) : null,
     genres: Array.isArray(data.genres) ? data.genres.map((g) => g.name) : [],
     runtime: data.runtime || null,
+    overview: data.overview || null,
+    cast,
+    director,
   };
   tmdbMovieCache.set(id, result);
   return result;
@@ -1130,6 +1151,9 @@ app.post('/tmdb/fetch-poster', async (req, res) => {
           genres: details.genres,
           year: details.year,
           runtime: details.runtime,
+          overview: details.overview,
+          cast: details.cast,
+          director: details.director,
         });
       } catch (e) {
         console.warn(`[tmdb] details fetch failed for ${tmdbId}: ${e.message}`);
@@ -1167,6 +1191,9 @@ app.post('/tmdb/save-metadata', async (req, res) => {
       genres: details.genres,
       year: details.year,
       runtime: details.runtime,
+      overview: details.overview,
+      cast: details.cast,
+      director: details.director,
     });
     res.json({ name: path.basename(videoPath), metadata });
   } catch (err) {
