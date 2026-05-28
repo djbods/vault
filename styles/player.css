@@ -1,0 +1,513 @@
+/* Custom Netflix-style player chrome over a controls-off <video>.
+   Keyframes (player-spin, player-skip-pulse) live in base.css. */
+
+.player-modal {
+  background: #000;
+  padding: 0;
+  align-items: stretch;
+  justify-content: stretch;
+}
+
+.player-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  overflow: hidden;
+  /* Hide system cursor when the overlay is auto-hidden. */
+}
+
+.player-shell[data-idle='true'] {
+  cursor: none;
+}
+
+.player-shell video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+  display: block;
+}
+
+.player-tap {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+.player-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 0.3s ease;
+  background:
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0) 18%, rgba(0, 0, 0, 0) 60%, rgba(0, 0, 0, 0.7) 100%);
+}
+
+.player-shell[data-idle='true'] .player-overlay {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.player-overlay > * {
+  pointer-events: auto;
+}
+
+/* Top bar — title left, close right. */
+.player-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 28px 36px 0;
+}
+
+.player-title {
+  font-family: 'Playfair Display', serif;
+  font-size: 22px;
+  font-weight: 400;
+  color: var(--text);
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1 1 auto;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+}
+
+/* Center play/pause button — only visible when paused. */
+.player-center-btn {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease, background 0.2s ease;
+}
+
+.player-shell[data-state='paused'] .player-center-btn,
+.player-shell[data-state='ended'] .player-center-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.player-center-btn:hover {
+  background: rgba(212, 160, 74, 0.18);
+  color: var(--gold-soft);
+}
+
+.player-center-btn svg {
+  width: 44px;
+  height: 44px;
+}
+
+.player-shell[data-state='paused'] .player-center-btn .icon-pause,
+.player-shell[data-state='ended'] .player-center-btn .icon-pause,
+.player-shell[data-state='playing'] .player-center-btn .icon-play {
+  display: none;
+}
+
+/* Buffering spinner — only while readyState is low. */
+.player-spinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 56px;
+  height: 56px;
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.player-shell[data-buffering='true'] .player-spinner {
+  opacity: 1;
+}
+
+.player-spinner-ring {
+  width: 100%;
+  height: 100%;
+  border: 3px solid rgba(255, 255, 255, 0.18);
+  border-top-color: var(--gold);
+  border-radius: 50%;
+  animation: player-spin 0.9s linear infinite;
+}
+
+/* Tap-feedback skip indicators (mobile double-tap). */
+.player-skip-indicator {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+.player-skip-indicator.show {
+  opacity: 1;
+  animation: player-skip-pulse 0.6s ease-out;
+}
+
+.player-skip-indicator--left  { left: 18%; }
+.player-skip-indicator--right { right: 18%; }
+.player-skip-indicator svg    { width: 28px; height: 28px; }
+.player-skip-indicator span   {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+
+/* Bottom area — scrub bar + controls row. */
+.player-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 36px 26px;
+}
+
+/* ----- Scrub bar -----
+   A short visible track, but a generous hit-area pad above so the
+   pointer can engage from a sloppy click. The bar grows on hover for
+   that Netflix scrubbing feel. */
+.player-scrub {
+  position: relative;
+  width: 100%;
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+}
+
+.player-scrub-hit {
+  position: relative;
+  height: 22px;
+  display: flex;
+  align-items: center;
+}
+
+.player-scrub-track {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 2px;
+  overflow: visible;
+  transition: height 0.18s ease;
+}
+
+.player-scrub:hover .player-scrub-track,
+.player-scrub.is-scrubbing .player-scrub-track {
+  height: 7px;
+}
+
+.player-scrub-buffer,
+.player-scrub-hover,
+.player-scrub-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.player-scrub-buffer {
+  background: rgba(255, 255, 255, 0.22);
+  width: 0;
+}
+
+.player-scrub-hover {
+  background: rgba(255, 255, 255, 0.14);
+  width: 0;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.player-scrub:hover .player-scrub-hover,
+.player-scrub.is-scrubbing .player-scrub-hover {
+  opacity: 1;
+}
+
+.player-scrub-progress {
+  background: var(--gold);
+  width: 0;
+  box-shadow: 0 0 8px rgba(212, 160, 74, 0.35);
+}
+
+.player-scrub-thumb {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 14px;
+  height: 14px;
+  background: var(--gold);
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0);
+  transition: transform 0.18s ease;
+  pointer-events: none;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+}
+
+.player-scrub:hover .player-scrub-thumb,
+.player-scrub.is-scrubbing .player-scrub-thumb {
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.player-scrub-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  padding: 5px 10px;
+  border-radius: 3px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.player-scrub.is-hovered .player-scrub-tooltip,
+.player-scrub.is-scrubbing .player-scrub-tooltip {
+  opacity: 1;
+}
+
+/* ----- Controls row ----- */
+.player-controls-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.player-controls-left,
+.player-controls-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  position: relative;
+}
+
+.player-icon-btn {
+  background: transparent;
+  border: none;
+  color: var(--text);
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: color 0.18s ease, background 0.18s ease, transform 0.15s ease;
+  padding: 0;
+}
+
+.player-icon-btn svg {
+  width: 24px;
+  height: 24px;
+}
+
+.player-icon-btn--lg svg {
+  width: 28px;
+  height: 28px;
+}
+
+.player-icon-btn:hover {
+  color: var(--gold-soft);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.player-icon-btn:active {
+  transform: scale(0.94);
+}
+
+.player-icon-btn[hidden] {
+  display: none;
+}
+
+.player-icon-btn.active {
+  color: var(--gold);
+}
+
+/* Play/pause icon swap driven by data-state on the shell. */
+.player-shell[data-state='playing'] #playerPlay .icon-play,
+.player-shell[data-state='paused']  #playerPlay .icon-pause,
+.player-shell[data-state='ended']   #playerPlay .icon-pause {
+  display: none;
+}
+
+/* Volume icon swap driven by data-vol on the shell. */
+.player-shell[data-vol='high'] #playerMute .icon-vol-low,
+.player-shell[data-vol='high'] #playerMute .icon-vol-mute,
+.player-shell[data-vol='low']  #playerMute .icon-vol-high,
+.player-shell[data-vol='low']  #playerMute .icon-vol-mute,
+.player-shell[data-vol='mute'] #playerMute .icon-vol-high,
+.player-shell[data-vol='mute'] #playerMute .icon-vol-low {
+  display: none;
+}
+
+/* Fullscreen icon swap. */
+.player-shell:not([data-fullscreen='true']) #playerFs .icon-fs-exit,
+.player-shell[data-fullscreen='true'] #playerFs .icon-fs-enter {
+  display: none;
+}
+
+/* Volume slider — only revealed on hover of the volume cluster. */
+.player-volume {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.player-volume-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 0;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+  outline: none;
+  opacity: 0;
+  transition: width 0.25s ease, opacity 0.2s ease, margin 0.25s ease;
+  margin: 0;
+}
+
+.player-volume:hover .player-volume-slider,
+.player-volume-slider:focus-visible {
+  width: 90px;
+  opacity: 1;
+  margin: 0 6px 0 2px;
+}
+
+.player-volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  background: var(--gold);
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+}
+
+.player-volume-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  background: var(--gold);
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+}
+
+.player-time {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  color: var(--text);
+  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+  margin-left: 4px;
+}
+
+.player-time-sep {
+  opacity: 0.45;
+}
+
+/* Subtitle menu — anchored above the CC button. */
+.sub-menu {
+  position: absolute;
+  bottom: calc(100% + 14px);
+  right: 0;
+  min-width: 200px;
+  background: rgba(15, 14, 18, 0.96);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 6px;
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 5;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+}
+
+.sub-menu.open {
+  display: flex;
+}
+
+.sub-menu-item {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  padding: 10px 14px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: all 0.2s ease;
+}
+
+.sub-menu-item:hover {
+  background: rgba(212, 160, 74, 0.08);
+  color: var(--gold-soft);
+}
+
+.sub-menu-item.active {
+  color: var(--gold);
+  background: rgba(212, 160, 74, 0.1);
+}
+
+/* Phone tweaks — shrink the chrome and hide rarely-used buttons inline. */
+@media (max-width: 720px) {
+  .player-top { padding: 18px 18px 0; }
+  .player-bottom { padding: 0 16px 18px; gap: 8px; }
+  .player-title { font-size: 16px; }
+  .player-controls-left,
+  .player-controls-right { gap: 4px; }
+  .player-icon-btn { width: 36px; height: 36px; }
+  .player-icon-btn svg { width: 22px; height: 22px; }
+  .player-time { font-size: 12px; }
+  /* Volume always hidden on phones — system volume keys are fine. */
+  .player-volume { display: none; }
+  .player-skip-indicator { width: 84px; height: 84px; }
+}

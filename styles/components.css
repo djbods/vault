@@ -1,0 +1,658 @@
+/* Reusable building blocks: modals, dropzone, stage rows, buttons, progress,
+   subtitle list (upload modal), TMDB picker grid, edit-modal internals. */
+
+/* ----- Modals ----- */
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 3, 6, 0.85);
+  backdrop-filter: blur(20px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  animation: fadeIn 0.3s ease;
+}
+
+.modal.active {
+  display: flex;
+}
+
+.modal-content {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  width: 540px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 40px;
+  position: relative;
+}
+
+.modal-content--wide {
+  width: 720px;
+}
+
+.modal-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 20px;
+  transition: color 0.3s ease;
+}
+
+.modal-close:hover {
+  color: var(--gold);
+}
+
+.modal-title {
+  font-family: 'Playfair Display', serif;
+  font-size: 28px;
+  font-weight: 500;
+  margin: 0 0 8px;
+}
+
+.modal-sub {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 32px;
+}
+
+/* ----- Dropzone ----- */
+.dropzone {
+  border: 1px dashed var(--border-strong);
+  border-radius: 4px;
+  padding: 56px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  background: rgba(212, 160, 74, 0.02);
+  display: block;
+}
+
+.dropzone:hover,
+.dropzone.drag-over {
+  border-color: var(--gold);
+  background: rgba(212, 160, 74, 0.06);
+}
+
+.dropzone-icon {
+  font-family: 'Playfair Display', serif;
+  font-size: 40px;
+  color: var(--gold);
+  font-style: italic;
+  margin-bottom: 16px;
+}
+
+.dropzone-text {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 14px;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.dropzone-sub {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.dropzone-link {
+  color: var(--gold);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ----- Stage row (upload modal subtitle/poster pickers) ----- */
+.stage-row {
+  margin-top: 18px;
+  padding: 16px 18px;
+  background: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.stage-row-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.stage-row-label {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.stage-row-name {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sub-pick {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  padding: 9px 14px;
+  background: transparent;
+  color: var(--gold-soft);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  white-space: nowrap;
+}
+
+.sub-pick:hover {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+/* The thumbnail preview slot inside the upload modal's poster stage row. */
+.poster-preview {
+  width: 42px;
+  height: 60px;
+  object-fit: cover;
+  border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* ----- Edit modal internals ----- */
+.edit-section {
+  margin-top: 22px;
+}
+.edit-section:first-of-type {
+  margin-top: 8px;
+}
+.edit-label {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 8px;
+}
+.edit-name-row {
+  display: flex;
+  gap: 10px;
+}
+.edit-name-input {
+  flex: 1;
+  background: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  padding: 9px 12px;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+.edit-name-input:focus {
+  border-color: var(--gold);
+}
+.edit-poster-row {
+  display: flex;
+  gap: 14px;
+  align-items: stretch;
+}
+.edit-poster-preview {
+  width: 80px;
+  height: 120px;
+  background: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.edit-poster-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.edit-poster-empty {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.edit-poster-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: center;
+  flex: 1;
+}
+
+/* Watched toggle in the edit modal — visual switch on top of a
+   hidden native checkbox so keyboard + screen-reader work fall back
+   cleanly. */
+.edit-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.edit-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.edit-toggle-track {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  background: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  transition: background 0.25s ease, border-color 0.25s ease;
+}
+.edit-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), background 0.25s ease;
+}
+.edit-toggle input:checked + .edit-toggle-track {
+  background: rgba(212, 160, 74, 0.18);
+  border-color: var(--gold);
+}
+.edit-toggle input:checked + .edit-toggle-track .edit-toggle-thumb {
+  transform: translateX(16px);
+  background: var(--gold);
+}
+.edit-toggle input:focus-visible + .edit-toggle-track {
+  outline: 1px solid var(--gold-soft);
+  outline-offset: 2px;
+}
+.edit-toggle-label {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.edit-sub-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.edit-sub-list:empty {
+  display: none;
+}
+.edit-sub-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 2px;
+}
+.edit-sub-row-name {
+  flex: 1;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.edit-sub-row-lang {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--gold-soft);
+}
+.edit-sub-row-remove {
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 4px;
+  transition: color 0.2s ease;
+}
+.edit-sub-row-remove:hover {
+  color: #d97757;
+}
+.edit-sub-add {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.edit-sub-lang {
+  background: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px;
+  padding: 8px 10px;
+  outline: none;
+}
+.edit-probe {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+.edit-details {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.6;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.edit-details-overview {
+  color: var(--text);
+}
+.edit-details-row {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+}
+.edit-details-row dt {
+  flex: 0 0 70px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 10px;
+  padding-top: 2px;
+}
+.edit-details-row dd {
+  flex: 1;
+  margin: 0;
+  color: var(--text);
+}
+.edit-probe .warn {
+  color: #d97757;
+}
+.edit-probe .ok {
+  color: var(--gold-soft);
+}
+.edit-reprocess {
+  width: 100%;
+}
+.edit-reprocess:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.edit-reprocess-note {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
+/* ----- Upload subtitle list ----- */
+.sub-clear {
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 18px;
+  padding: 0 4px;
+  transition: color 0.3s ease;
+}
+
+.sub-clear:hover {
+  color: var(--danger);
+}
+
+.sub-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.sub-list:empty {
+  display: none;
+}
+
+.sub-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+}
+
+.sub-row-name {
+  flex: 1 1 auto;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.sub-row-lang {
+  flex: 0 0 auto;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  padding: 6px 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--text);
+  cursor: pointer;
+  outline: none;
+}
+
+.sub-row-lang:focus {
+  border-color: var(--gold);
+}
+
+.sub-row-remove {
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 18px;
+  padding: 0 4px;
+  transition: color 0.3s ease;
+}
+
+.sub-row-remove:hover {
+  color: var(--danger);
+}
+
+/* ----- TMDB poster picker ----- */
+.tmdb-search {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.tmdb-input {
+  flex: 1;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  color: var(--text);
+  outline: none;
+}
+
+.tmdb-input:focus {
+  border-color: var(--border-strong);
+}
+
+.tmdb-results {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 14px;
+  max-height: 50vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.tmdb-card {
+  background: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.tmdb-card:hover {
+  border-color: var(--gold);
+  transform: translateY(-2px);
+}
+
+.tmdb-card.selected {
+  border-color: var(--gold);
+  box-shadow: 0 0 24px rgba(212, 160, 74, 0.25);
+}
+
+.tmdb-poster {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  display: block;
+  background: #1a1820;
+}
+
+.tmdb-meta {
+  padding: 10px 12px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.tmdb-meta .t-name {
+  color: var(--text);
+  font-weight: 500;
+  margin-bottom: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tmdb-empty {
+  padding: 40px 20px;
+  text-align: center;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* ----- Buttons + progress ----- */
+.upload-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 24px;
+}
+
+.btn-primary {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  padding: 14px 32px;
+  background: rgba(212, 160, 74, 0.1);
+  color: var(--gold);
+  border: 1px solid var(--gold);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.btn-primary:hover {
+  background: rgba(212, 160, 74, 0.18);
+  box-shadow: 0 0 30px rgba(212, 160, 74, 0.2);
+}
+
+.btn-primary:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.progress {
+  margin-top: 24px;
+  display: none;
+}
+
+.progress.active {
+  display: block;
+}
+
+.progress-label {
+  display: flex;
+  justify-content: space-between;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+
+.progress-bar {
+  height: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 1px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--gold-deep), var(--gold), var(--gold-soft));
+  box-shadow: 0 0 12px rgba(212, 160, 74, 0.5);
+  transition: width 0.2s ease;
+}

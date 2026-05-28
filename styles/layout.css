@@ -1,0 +1,363 @@
+/* App shell, header, tabs, main scroll area, views, shelves, genre bar,
+   section labels, magnet input row, empty states, and layout-level
+   media queries. */
+
+.app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 32px;
+  padding: 28px 56px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.brand {
+  font-family: 'Playfair Display', serif;
+  font-weight: 500;
+  font-size: 28px;
+  letter-spacing: 0.65em;
+  color: var(--text);
+  position: relative;
+}
+
+.brand::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0.65em;
+  bottom: -6px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold) 50%, transparent);
+  opacity: 0.4;
+}
+
+.brand-sub {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-top: 8px;
+  padding-left: 0.65em;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.tab {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+  padding: 12px 22px;
+  background: transparent;
+  color: var(--text-faint);
+  border: 1px solid transparent;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: all 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+  position: relative;
+}
+
+.tab:hover {
+  color: var(--text-dim);
+}
+
+.tab.active {
+  color: var(--gold);
+}
+
+.tab.active::after {
+  content: '';
+  position: absolute;
+  left: 22px;
+  right: 22px;
+  bottom: 6px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold) 50%, transparent);
+}
+
+.upload-btn {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  padding: 14px 28px;
+  background: transparent;
+  color: var(--gold-soft);
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: all 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.upload-btn:hover {
+  background: rgba(212, 160, 74, 0.08);
+  border-color: var(--gold);
+  color: var(--gold);
+  box-shadow: 0 0 30px rgba(212, 160, 74, 0.15);
+}
+
+main {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 48px 56px 80px;
+}
+
+main::-webkit-scrollbar {
+  width: 8px;
+}
+main::-webkit-scrollbar-track {
+  background: transparent;
+}
+main::-webkit-scrollbar-thumb {
+  background: rgba(212, 160, 74, 0.15);
+  border-radius: 4px;
+}
+main::-webkit-scrollbar-thumb:hover {
+  background: rgba(212, 160, 74, 0.3);
+}
+
+.view {
+  display: none;
+}
+
+.view.active {
+  display: block;
+}
+
+.section-label {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 32px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.section-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(212, 160, 74, 0.12), transparent);
+}
+
+/* Genre filter pills. Horizontal-scrolling row that replaces the
+   old "Your Library" heading. Pills are multi-select toggles; an
+   empty selection means "show everything". */
+.genre-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 32px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(212, 160, 74, 0.2) transparent;
+}
+.genre-bar::-webkit-scrollbar { height: 4px; }
+.genre-bar::-webkit-scrollbar-track { background: transparent; }
+.genre-bar::-webkit-scrollbar-thumb {
+  background: rgba(212, 160, 74, 0.18);
+  border-radius: 2px;
+}
+
+.genre-pill {
+  flex: 0 0 auto;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  padding: 8px 16px;
+  background: var(--surface);
+  color: var(--text-dim);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.25s ease;
+}
+.genre-pill:hover {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+.genre-pill.active {
+  color: var(--gold);
+  background: rgba(212, 160, 74, 0.14);
+  border-color: var(--gold);
+}
+.genre-pill.genre-pill--all {
+  font-weight: 600;
+  letter-spacing: 0.3em;
+}
+.genre-pill.genre-pill--all.active {
+  color: var(--gold);
+  background: rgba(212, 160, 74, 0.2);
+}
+
+/* Continue Watching shelf — horizontal scroll row of in-progress films
+   above the main grid. Reuses .card markup for visual consistency. */
+.shelf {
+  margin: 0 0 36px;
+}
+.shelf-head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.shelf-title {
+  font-family: 'Playfair Display', serif;
+  font-weight: 500;
+  font-size: 22px;
+  letter-spacing: 0.04em;
+  margin: 0;
+  color: var(--text);
+}
+.shelf-count {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.shelf-row {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(180px, 220px);
+  gap: 18px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(212, 160, 74, 0.2) transparent;
+}
+.shelf-row::-webkit-scrollbar { height: 6px; }
+.shelf-row::-webkit-scrollbar-track { background: transparent; }
+.shelf-row::-webkit-scrollbar-thumb {
+  background: rgba(212, 160, 74, 0.18);
+  border-radius: 2px;
+}
+
+.magnet-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 36px;
+  max-width: 920px;
+}
+
+.magnet-input {
+  flex: 1;
+  font-family: 'JetBrains Mono', 'DM Sans', monospace;
+  font-size: 12px;
+  padding: 14px 18px;
+  background: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.3s ease, background 0.3s ease;
+}
+
+.magnet-input::placeholder {
+  color: var(--text-faint);
+  letter-spacing: 0.05em;
+}
+
+.magnet-input:focus {
+  border-color: var(--border-strong);
+  background: rgba(212, 160, 74, 0.03);
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 120px 24px;
+  text-align: center;
+}
+
+.empty-icon {
+  font-family: 'Playfair Display', serif;
+  font-size: 64px;
+  color: var(--text-faint);
+  margin-bottom: 24px;
+  font-style: italic;
+}
+
+.empty-title {
+  font-family: 'Playfair Display', serif;
+  font-size: 24px;
+  font-weight: 400;
+  color: var(--text-dim);
+  margin: 0 0 12px;
+}
+
+.empty-sub {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* Tablet — tighten outer padding so the grid breathes more. The card
+   column count adjusts in cards.css. */
+@media (max-width: 1024px) {
+  header {
+    padding: 24px 32px;
+  }
+  main {
+    padding: 36px 32px 72px;
+  }
+}
+
+/* Phone — shrink chrome + stack the magnet row. */
+@media (max-width: 720px) {
+  header {
+    padding: 18px 16px;
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+  main {
+    padding: 24px 16px 56px;
+  }
+  .brand {
+    font-size: 20px;
+    letter-spacing: 0.4em;
+  }
+  .brand-sub { display: none; }
+  .tabs { gap: 0; }
+  .upload-btn,
+  .tab {
+    padding: 9px 12px;
+    font-size: 10px;
+    letter-spacing: 0.22em;
+  }
+  .tab.active::after { left: 12px; right: 12px; }
+  .genre-bar {
+    margin-left: -16px;
+    margin-right: -16px;
+    padding: 0 16px 6px;
+  }
+  .magnet-row {
+    flex-direction: column;
+  }
+}
