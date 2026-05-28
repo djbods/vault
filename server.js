@@ -277,6 +277,9 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
+app.use('/js', express.static(path.join(__dirname, 'js')));
+app.use('/styles', express.static(path.join(__dirname, 'styles')));
+
 // ---------- Local videos ----------
 
 app.post('/upload', upload.single('file'), async (req, res) => {
