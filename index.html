@@ -389,11 +389,7 @@
         deleteSubtitle,
         uploadPoster,
         deletePoster,
-        tmdbStatus,
-        tmdbSearch,
-        tmdbSuggestQuery,
         tmdbFetchPoster,
-        tmdbBackfill,
         fetchTorrents,
         addTorrentMagnet,
         removeTorrent as apiRemoveTorrent,
@@ -401,6 +397,7 @@
         saveTorrentToLibrary as apiSaveTorrentToLibrary,
       } from './js/api.js';
       import { initPlayer, playLocalVideo, playTorrent, resetPlayer } from './js/player.js';
+      import { initTmdb, openTmdbPicker, runTmdbBackfill } from './js/tmdb.js';
 
       // ---- DOM refs
       const gridEl = document.getElementById('grid');
@@ -463,9 +460,6 @@
       let stagedVideo = null;
       let stagedSubtitles = []; // [{ file, lang }]
       let stagedPoster = null;  // { kind: 'file', file } | { kind: 'tmdb', posterPath, previewUrl }
-      let tmdbConfigured = null;
-      let posterEditorMode = null; // null (upload-stage) | { videoName }
-      let posterTmdbSelected = null; // { posterPath, previewUrl }
 
       // ---- Tabs
       const switchTab = (name) => {
@@ -668,8 +662,18 @@
         updatePosterSlotUI();
       });
       posterTmdb.addEventListener('click', () => {
-        posterEditorMode = null; // stage-only mode
-        openTmdbPicker(stagedVideo ? stagedVideo.name : '');
+        openTmdbPicker(stagedVideo ? stagedVideo.name : '', {
+          onCommit: (picked) => {
+            stagedPoster = {
+              kind: 'tmdb',
+              tmdbId: picked.tmdbId,
+              posterPath: picked.posterPath,
+              previewUrl: picked.previewUrl,
+              title: picked.title,
+            };
+            updatePosterSlotUI();
+          },
+        });
       });
 
       commitUploadBtn.addEventListener('click', async () => {
@@ -712,147 +716,7 @@
         if (poster.kind === 'tmdb') return tmdbFetchPoster(poster.posterPath, videoName, poster.tmdbId);
       };
 
-      // ---- Status toast (TMDB backfill + other background work)
-      const statusToast = document.getElementById('statusToast');
-      const statusToastText = document.getElementById('statusToastText');
-      let statusToastHideTimer = null;
-      const showStatusToast = (text, { state = 'running', autoHideMs = 0 } = {}) => {
-        if (statusToastHideTimer) { clearTimeout(statusToastHideTimer); statusToastHideTimer = null; }
-        statusToastText.textContent = text;
-        statusToast.dataset.state = state;
-        statusToast.hidden = false;
-        // Defer the visibility flip a tick so the transition runs.
-        requestAnimationFrame(() => { statusToast.dataset.visible = 'true'; });
-        if (autoHideMs > 0) {
-          statusToastHideTimer = setTimeout(hideStatusToast, autoHideMs);
-        }
-      };
-      const hideStatusToast = () => {
-        statusToast.dataset.visible = 'false';
-        setTimeout(() => { if (statusToast.dataset.visible !== 'true') statusToast.hidden = true; }, 300);
-      };
-
-      // ---- TMDB picker
-      const ensureTmdbStatus = async () => {
-        if (tmdbConfigured !== null) return tmdbConfigured;
-        tmdbConfigured = await tmdbStatus();
-        return tmdbConfigured;
-      };
-
-      const renderTmdbResults = (results) => {
-        tmdbResults.innerHTML = '';
-        posterTmdbSelected = null;
-        posterActions.style.display = 'none';
-        if (!results.length) {
-          tmdbResults.innerHTML = `<div class="tmdb-empty">No matches. Try a different title.</div>`;
-          return;
-        }
-        const grid = document.createElement('div');
-        grid.className = 'tmdb-results';
-        results.forEach((m) => {
-          const card = document.createElement('div');
-          card.className = 'tmdb-card';
-          card.innerHTML = `
-            ${m.posterUrl
-              ? `<img class="tmdb-poster" src="${m.posterUrl}" alt="" loading="lazy"/>`
-              : `<div class="tmdb-poster"></div>`}
-            <div class="tmdb-meta">
-              <div class="t-name">${escapeHtml(m.title || 'Untitled')}</div>
-              <div>${escapeHtml(m.year || '—')}</div>
-            </div>
-          `;
-          card.addEventListener('click', () => {
-            grid.querySelectorAll('.tmdb-card').forEach((c) => c.classList.remove('selected'));
-            card.classList.add('selected');
-            posterTmdbSelected = {
-              tmdbId: m.id,
-              posterPath: m.posterPath,
-              previewUrl: m.posterUrl,
-              title: m.title,
-            };
-            posterActions.style.display = posterTmdbSelected.posterPath ? 'flex' : 'none';
-          });
-          grid.appendChild(card);
-        });
-        tmdbResults.appendChild(grid);
-      };
-
-      const runTmdbSearch = async () => {
-        const q = tmdbQuery.value.trim();
-        if (!q) return;
-        tmdbResults.innerHTML = `<div class="tmdb-empty">Searching…</div>`;
-        posterActions.style.display = 'none';
-        try {
-          const data = await tmdbSearch(q);
-          renderTmdbResults(data.results || []);
-        } catch (err) {
-          tmdbResults.innerHTML = `<div class="tmdb-empty">${escapeHtml(err.message)}</div>`;
-        }
-      };
-
-      const openTmdbPicker = async (filename) => {
-        const ok = await ensureTmdbStatus();
-        if (!ok) {
-          alert('TMDB is not configured. Add TMDB_API_KEY to .env and restart the server.');
-          return;
-        }
-        posterModalSub.textContent = posterEditorMode
-          ? `Update poster for ${cleanName(posterEditorMode.videoName)}`
-          : 'Search The Movie Database';
-        tmdbResults.innerHTML = '';
-        posterActions.style.display = 'none';
-        posterTmdbSelected = null;
-        // Prefill cleaned query from filename
-        try {
-          if (filename) {
-            const data = await tmdbSuggestQuery(filename);
-            tmdbQuery.value = data.query || cleanName(filename);
-          } else {
-            tmdbQuery.value = '';
-          }
-        } catch {
-          tmdbQuery.value = filename ? cleanName(filename) : '';
-        }
-        openModal(posterModal);
-        if (tmdbQuery.value) runTmdbSearch();
-        setTimeout(() => tmdbQuery.focus(), 50);
-      };
-
-      tmdbSearchBtn.addEventListener('click', runTmdbSearch);
-      tmdbQuery.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') runTmdbSearch();
-      });
-
-      posterCommit.addEventListener('click', async () => {
-        if (!posterTmdbSelected) return;
-        if (posterEditorMode) {
-          posterCommit.disabled = true;
-          try {
-            await tmdbFetchPoster(posterTmdbSelected.posterPath, posterEditorMode.videoName);
-            closeModal(posterModal);
-            // If the TMDB picker was opened from the per-card edit modal,
-            // refresh its poster preview so the change shows without reopen.
-            if (editing && editing.videoName === posterEditorMode.videoName) {
-              await refreshEditPoster();
-            }
-            loadVideos();
-          } catch (err) {
-            alert(err.message);
-          } finally {
-            posterCommit.disabled = false;
-          }
-        } else {
-          stagedPoster = {
-            kind: 'tmdb',
-            tmdbId: posterTmdbSelected.tmdbId,
-            posterPath: posterTmdbSelected.posterPath,
-            previewUrl: posterTmdbSelected.previewUrl,
-            title: posterTmdbSelected.title,
-          };
-          updatePosterSlotUI();
-          closeModal(posterModal);
-        }
-      });
+      // ---- TMDB picker + auto-backfill live in js/tmdb.js.
 
       // ---- Edit modal (per-card: rename, poster, subtitles)
       // editing.videoName is the canonical filename on disk; updates to
@@ -1093,11 +957,20 @@
 
       editPosterTmdb.addEventListener('click', () => {
         if (!editing) return;
-        // openTmdbPicker reads posterEditorMode to know it's editing an
-        // existing card vs. staging a fresh upload. We keep editModal open
-        // underneath; on success it refreshes via posterEditorMode flow.
-        posterEditorMode = { videoName: editing.videoName };
-        openTmdbPicker(editing.videoName);
+        // Edit-flow commit: write the selected poster straight to the file
+        // and refresh both the inline preview and the library grid. The
+        // edit modal stays open underneath the picker.
+        const targetVideoName = editing.videoName;
+        openTmdbPicker(targetVideoName, {
+          subtitle: `Update poster for ${cleanName(targetVideoName)}`,
+          onCommit: async (picked) => {
+            await tmdbFetchPoster(picked.posterPath, targetVideoName);
+            if (editing && editing.videoName === targetVideoName) {
+              await refreshEditPoster();
+            }
+            loadVideos();
+          },
+        });
       });
 
       editPosterRemove.addEventListener('click', async () => {
@@ -1605,35 +1478,10 @@
       });
 
       // ---- Boot
-      const runTmdbBackfill = async () => {
-        if (!(await ensureTmdbStatus())) return;
-        // Only worth asking if at least one library file has no tmdbId — saves
-        // a server round-trip for fully-tagged libraries on every reload.
-        if (!libraryCache.some((v) => !v.tmdbId)) return;
-        showStatusToast('Looking up film details…');
-        try {
-          const { ok, body: summary } = await tmdbBackfill();
-          if (!ok) {
-            showStatusToast(summary.error || 'TMDB lookup failed', { state: 'done', autoHideMs: 4000 });
-            return;
-          }
-          if (summary.matched > 0) {
-            await loadVideos();
-            const word = summary.matched === 1 ? 'film' : 'films';
-            showStatusToast(`Matched ${summary.matched} ${word} to TMDB`, { state: 'done', autoHideMs: 3500 });
-          } else if (summary.candidates > 0) {
-            showStatusToast('No confident TMDB matches', { state: 'done', autoHideMs: 3000 });
-          } else {
-            hideStatusToast();
-          }
-        } catch (err) {
-          showStatusToast('TMDB lookup unavailable', { state: 'done', autoHideMs: 3000 });
-        }
-      };
-
+      initTmdb();
       (async () => {
         await loadVideos();
-        runTmdbBackfill();
+        runTmdbBackfill(libraryCache, loadVideos);
       })();
     </script>
   </body>
