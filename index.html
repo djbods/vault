@@ -364,31 +364,17 @@
 
     <script type="module">
       import {
-        SUB_LANG_OPTIONS,
-        labelForLang,
         formatSize,
         formatSpeed,
         formatEta,
-        formatTime,
         cleanName,
         escapeHtml,
-        isTouchDevice,
-        isTypingTarget,
       } from './js/utils.js';
       import {
         API,
         fetchVideos,
         deleteVideo as apiDeleteVideo,
-        renameVideo,
-        reprocessVideo,
-        probeVideo,
         patchVideoMetadata,
-        fetchSubtitles,
-        uploadSubtitle,
-        deleteSubtitle,
-        uploadPoster,
-        deletePoster,
-        tmdbFetchPoster,
         fetchTorrents,
         addTorrentMagnet,
         removeTorrent as apiRemoveTorrent,
@@ -396,8 +382,9 @@
         saveTorrentToLibrary as apiSaveTorrentToLibrary,
       } from './js/api.js';
       import { initPlayer, playLocalVideo, playTorrent, resetPlayer } from './js/player.js';
-      import { initTmdb, openTmdbPicker, runTmdbBackfill } from './js/tmdb.js';
-      import { initUpload, resetUploadModal, inferLangFromFilename } from './js/upload.js';
+      import { initTmdb, runTmdbBackfill } from './js/tmdb.js';
+      import { initUpload, resetUploadModal } from './js/upload.js';
+      import { initEdit, openEditModal } from './js/edit.js';
 
       // ---- DOM refs
       const gridEl = document.getElementById('grid');
@@ -408,19 +395,6 @@
       const playerModal = document.getElementById('playerModal');
       const posterModal = document.getElementById('posterModal');
       const editModal = document.getElementById('editModal');
-      const editModalSub = document.getElementById('editModalSub');
-      const editName = document.getElementById('editName');
-      const editNameSave = document.getElementById('editNameSave');
-      const editPosterPreview = document.getElementById('editPosterPreview');
-      const editPosterTmdb = document.getElementById('editPosterTmdb');
-      const editPosterUpload = document.getElementById('editPosterUpload');
-      const editPosterRemove = document.getElementById('editPosterRemove');
-      const editSubList = document.getElementById('editSubList');
-      const editSubInput = document.getElementById('editSubInput');
-      const editSubLang = document.getElementById('editSubLang');
-      const editSubPick = document.getElementById('editSubPick');
-      const editProbe = document.getElementById('editProbe');
-      const editReprocess = document.getElementById('editReprocess');
       const tabsEl = document.getElementById('tabs');
       const openUploadBtn = document.getElementById('openUpload');
       const magnetInput = document.getElementById('magnetInput');
@@ -498,291 +472,9 @@
 
       // ---- TMDB picker + auto-backfill live in js/tmdb.js.
 
-      // ---- Edit modal (per-card: rename, poster, subtitles)
-      // editing.videoName is the canonical filename on disk; updates to
-      // poster/subtitle endpoints all key off it. After a rename we update
-      // editing.videoName so subsequent actions target the new file.
-      let editing = null;
-
-      const populateEditSubLang = () => {
-        if (editSubLang.options.length) return;
-        SUB_LANG_OPTIONS.forEach(([code, label]) => {
-          const opt = document.createElement('option');
-          opt.value = code;
-          opt.textContent = label;
-          editSubLang.appendChild(opt);
-        });
-      };
-
-      const renderEditPoster = (videoName, posterUrl) => {
-        if (posterUrl) {
-          editPosterPreview.innerHTML = `<img src="${API}${posterUrl}?t=${Date.now()}" alt=""/>`;
-          editPosterRemove.style.display = '';
-        } else {
-          editPosterPreview.innerHTML = '<span class="edit-poster-empty">None</span>';
-          editPosterRemove.style.display = 'none';
-        }
-      };
-
-      const renderEditSubList = (subs) => {
-        editSubList.innerHTML = '';
-        subs.forEach((s) => {
-          const row = document.createElement('div');
-          row.className = 'edit-sub-row';
-          row.innerHTML = `
-            <span class="edit-sub-row-name"></span>
-            <span class="edit-sub-row-lang"></span>
-            <button class="edit-sub-row-remove" type="button" title="Delete subtitle">×</button>
-          `;
-          row.querySelector('.edit-sub-row-name').textContent = s.name;
-          row.querySelector('.edit-sub-row-lang').textContent = s.label || (s.lang || '').toUpperCase();
-          row.querySelector('.edit-sub-row-remove').addEventListener('click', async () => {
-            if (!confirm(`Delete subtitle "${s.name}"?`)) return;
-            try {
-              const r = await deleteSubtitle(editing.videoName, s.name);
-              if (!r.ok) throw new Error('Delete failed');
-              await refreshEditSubList();
-            } catch (err) {
-              alert(err.message);
-            }
-          });
-          editSubList.appendChild(row);
-        });
-      };
-
-      const refreshEditSubList = async () => {
-        const subs = await fetchSubtitles(editing.videoName);
-        renderEditSubList(subs);
-      };
-
-      // Pull a probe of the underlying file (audio codec, container,
-      // embedded subtitle streams) and render a short status line plus
-      // a hint for the re-process button.
-      const refreshEditProbe = async () => {
-        editProbe.textContent = 'Probing…';
-        try {
-          const r = await probeVideo(editing.videoName);
-          if (!r.ok) {
-            editProbe.textContent = 'Could not probe video file.';
-            return;
-          }
-          const p = await r.json();
-          const audio = p.audioCodec || 'none';
-          const audioClass = p.audioBrowserCompatible ? 'ok' : 'warn';
-          const container = p.container.replace('.', '').toUpperCase();
-          const containerClass = p.containerBrowserCompatible ? 'ok' : 'warn';
-          const extractable = p.embeddedSubtitles.filter((s) => s.extractable);
-          const bitmapCount = p.embeddedSubtitles.length - extractable.length;
-          const parts = [
-            `<span class="${containerClass}">${container}</span> container`,
-            `<span class="${audioClass}">${audio.toUpperCase()}</span> audio`,
-          ];
-          if (p.videoCodec) parts.push(`${p.videoCodec.toUpperCase()} video`);
-          let line = parts.join(' · ');
-          if (extractable.length) {
-            line += `<br/><span class="warn">${extractable.length} embedded subtitle track${extractable.length === 1 ? '' : 's'} not yet extracted</span>`;
-          }
-          if (bitmapCount) {
-            line += `<br/>${bitmapCount} bitmap subtitle track${bitmapCount === 1 ? '' : 's'} (cannot extract)`;
-          }
-          if (!p.browserCompatible) {
-            line += `<br/><span class="warn">Browser cannot play this file as-is — re-process to fix.</span>`;
-          }
-          editProbe.innerHTML = line;
-        } catch {
-          editProbe.textContent = 'Could not probe video file.';
-        }
-      };
-
-      const refreshEditPoster = async () => {
-        // /videos returns the canonical poster URL, including a fresh
-        // mtime-based query string. Re-fetch instead of guessing.
-        try {
-          const list = await fetchVideos();
-          const v = list.find((x) => x.name === editing.videoName);
-          renderEditPoster(editing.videoName, v && v.poster);
-        } catch {}
-      };
-
-      const editDetailsSection = document.getElementById('editDetailsSection');
-      const editDetails = document.getElementById('editDetails');
-
-      const renderEditDetails = (v) => {
-        const overview = v.overview || '';
-        const cast = Array.isArray(v.cast) ? v.cast : [];
-        const director = v.director || '';
-        const year = v.year || '';
-        const runtime = v.runtime ? `${v.runtime} min` : '';
-        const genres = (v.genres || []).join(', ');
-        const rows = [];
-        if (director) rows.push(`<div class="edit-details-row"><dt>Director</dt><dd>${escapeHtml(director)}</dd></div>`);
-        if (cast.length) rows.push(`<div class="edit-details-row"><dt>Cast</dt><dd>${escapeHtml(cast.join(', '))}</dd></div>`);
-        if (year || runtime) {
-          const parts = [year, runtime].filter(Boolean).map(escapeHtml).join(' · ');
-          rows.push(`<div class="edit-details-row"><dt>Year</dt><dd>${parts}</dd></div>`);
-        }
-        if (genres) rows.push(`<div class="edit-details-row"><dt>Genres</dt><dd>${escapeHtml(genres)}</dd></div>`);
-        const hasAny = overview || rows.length;
-        editDetailsSection.style.display = hasAny ? '' : 'none';
-        editDetails.innerHTML = (overview ? `<div class="edit-details-overview">${escapeHtml(overview)}</div>` : '') + rows.join('');
-      };
-
-      const openEditModal = async (videoName) => {
-        populateEditSubLang();
-        editing = { videoName };
-        editModalSub.textContent = cleanName(videoName);
-        editName.value = cleanName(videoName);
-        editSubLang.value = 'en';
-        // Find this video in the most recent /videos response for the poster
-        // and the watched/metadata flags.
-        const list = await fetchVideos().catch(() => []);
-        const v = list.find((x) => x.name === videoName) || {};
-        renderEditPoster(videoName, v.poster);
-        editWatched.checked = Boolean(v.watched);
-        editWatchedLabel.textContent = v.watched ? 'Watched' : 'Not watched';
-        renderEditDetails(v);
-        const subs = await fetchSubtitles(videoName);
-        renderEditSubList(subs);
-        refreshEditProbe();
-        openModal(editModal);
-      };
-
-      const editWatched = document.getElementById('editWatched');
-      const editWatchedLabel = document.getElementById('editWatchedLabel');
-
-      // PATCH the per-video metadata sidecar. Used by the edit-modal toggle
-      // and by the player's 'ended' auto-mark. Always refreshes the library
-      // grid so the corner badge shows up immediately.
-      const setWatched = async (videoName, watched) => {
-        try {
-          await patchVideoMetadata(videoName, { watched });
-          loadVideos();
-        } catch (err) {
-          console.warn('setWatched failed', err);
-        }
-      };
-
-      editWatched.addEventListener('change', async () => {
-        if (!editing) return;
-        const next = editWatched.checked;
-        editWatchedLabel.textContent = next ? 'Watched' : 'Not watched';
-        await setWatched(editing.videoName, next);
-      });
-
-      editReprocess.addEventListener('click', async () => {
-        if (!editing) return;
-        if (!confirm('Re-process this video?\n\nThis re-encodes audio if needed and extracts embedded subtitles. It can take a while for large files.')) return;
-        editReprocess.disabled = true;
-        const originalLabel = editReprocess.textContent;
-        editReprocess.textContent = 'Re-processing…';
-        try {
-          const body = await reprocessVideo(editing.videoName);
-          // The video filename may have changed (.mkv → .mp4). Track the
-          // new name so subsequent edit-modal actions target it.
-          editing.videoName = body.name;
-          editModalSub.textContent = cleanName(body.name);
-          editName.value = cleanName(body.name);
-          await Promise.all([refreshEditSubList(), refreshEditProbe(), refreshEditPoster()]);
-          loadVideos();
-          const addedMsg = body.subtitlesAdded && body.subtitlesAdded.length
-            ? ` Extracted ${body.subtitlesAdded.length} subtitle${body.subtitlesAdded.length === 1 ? '' : 's'}.`
-            : '';
-          alert(`Re-process complete.${addedMsg}`);
-        } catch (err) {
-          alert(err.message);
-        } finally {
-          editReprocess.disabled = false;
-          editReprocess.textContent = originalLabel;
-        }
-      });
-
-      editNameSave.addEventListener('click', async () => {
-        if (!editing) return;
-        const newName = editName.value.trim();
-        if (!newName || newName === cleanName(editing.videoName)) return;
-        editNameSave.disabled = true;
-        try {
-          const body = await renameVideo(editing.videoName, newName);
-          editing.videoName = body.name;
-          editModalSub.textContent = cleanName(body.name);
-          editName.value = cleanName(body.name);
-          // Sidecars (poster + subs) were renamed too — refresh both panels.
-          await Promise.all([refreshEditPoster(), refreshEditSubList()]);
-          loadVideos();
-        } catch (err) {
-          alert(err.message);
-        } finally {
-          editNameSave.disabled = false;
-        }
-      });
-
-      editPosterUpload.addEventListener('click', () => {
-        if (!editing) return;
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = 'image/jpeg,image/png,image/webp';
-        input.addEventListener('change', async () => {
-          const file = input.files && input.files[0];
-          if (!file) return;
-          try {
-            await uploadPoster(file, editing.videoName);
-            await refreshEditPoster();
-            loadVideos();
-          } catch (err) {
-            alert(err.message);
-          }
-        });
-        input.click();
-      });
-
-      editPosterTmdb.addEventListener('click', () => {
-        if (!editing) return;
-        // Edit-flow commit: write the selected poster straight to the file
-        // and refresh both the inline preview and the library grid. The
-        // edit modal stays open underneath the picker.
-        const targetVideoName = editing.videoName;
-        openTmdbPicker(targetVideoName, {
-          subtitle: `Update poster for ${cleanName(targetVideoName)}`,
-          onCommit: async (picked) => {
-            await tmdbFetchPoster(picked.posterPath, targetVideoName);
-            if (editing && editing.videoName === targetVideoName) {
-              await refreshEditPoster();
-            }
-            loadVideos();
-          },
-        });
-      });
-
-      editPosterRemove.addEventListener('click', async () => {
-        if (!editing) return;
-        if (!confirm('Remove the current poster?')) return;
-        try {
-          await deletePoster(editing.videoName);
-          await refreshEditPoster();
-          loadVideos();
-        } catch (err) {
-          alert(err.message);
-        }
-      });
-
-      editSubPick.addEventListener('click', () => editSubInput.click());
-      editSubInput.addEventListener('change', async () => {
-        if (!editing) return;
-        const file = editSubInput.files && editSubInput.files[0];
-        if (!file) return;
-        // Prefer a language tag inferred from the filename if it matches
-        // a known option; otherwise use the selected dropdown value.
-        const inferred = inferLangFromFilename(file.name);
-        const lang = inferred !== 'en' ? inferred : editSubLang.value;
-        try {
-          await uploadSubtitle(file, editing.videoName, lang);
-          await refreshEditSubList();
-        } catch (err) {
-          alert(err.message);
-        } finally {
-          editSubInput.value = '';
-        }
-      });
+      // ---- Edit modal lives in js/edit.js.
+      // initEdit() wires the rename / poster / subtitle / re-process handlers.
+      // openEditModal(videoName) is imported and called by library card clicks.
 
       // ---- Hover preview (Netflix-style)
       const HOVER_DELAY_MS = 600;
@@ -825,14 +517,22 @@
         card.addEventListener('mouseleave', stop);
       };
 
-      // ---- Player
-      // The video element + all playback chrome lives in js/player.js.
-      // We pass setWatched here so the 95%-watched auto-mark + the 'ended'
-      // event can update the library grid without player.js importing it.
-      initPlayer({ onWatchedChange: setWatched });
-
-
       // ---- Library
+      // PATCH the per-video metadata sidecar. Called by the edit modal's
+      // watched toggle and by the player's 95%-watched / 'ended' auto-mark.
+      // Always refreshes the library so the corner badge updates.
+      const setWatched = async (videoName, watched) => {
+        try {
+          await patchVideoMetadata(videoName, { watched });
+          loadVideos();
+        } catch (err) {
+          console.warn('setWatched failed', err);
+        }
+      };
+
+      initPlayer({ onWatchedChange: setWatched });
+      initEdit({ onLibraryRefresh: () => loadVideos(), onWatchedChange: setWatched });
+
       const deleteVideo = async (filename) => {
         if (!confirm(`Delete "${cleanName(filename)}"?`)) return;
         const res = await apiDeleteVideo(filename);
