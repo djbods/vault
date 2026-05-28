@@ -2661,16 +2661,31 @@
         isTouchDevice,
         isTypingTarget,
       } from './js/utils.js';
-
-      // Use the origin the page was loaded from so the API base matches the
-      // host the browser sees. Loading from http://<mac-lan-ip>:3001/ then
-      // produces stream URLs the LAN can reach — which is what Safari hands
-      // to an AirPlay receiver (the TV fetches the URL itself; "localhost"
-      // resolves to the TV, not the Mac). Falls back to localhost when the
-      // page is opened via file:// so the existing dev flow still works.
-      const API = location.protocol === 'http:' || location.protocol === 'https:'
-        ? location.origin
-        : 'http://localhost:3001';
+      import {
+        API,
+        fetchVideos,
+        deleteVideo as apiDeleteVideo,
+        renameVideo,
+        reprocessVideo,
+        probeVideo,
+        patchVideoMetadata,
+        uploadVideo as apiUploadVideo,
+        fetchSubtitles,
+        uploadSubtitle,
+        deleteSubtitle,
+        uploadPoster,
+        deletePoster,
+        tmdbStatus,
+        tmdbSearch,
+        tmdbSuggestQuery,
+        tmdbFetchPoster,
+        tmdbBackfill,
+        fetchTorrents,
+        addTorrentMagnet,
+        removeTorrent as apiRemoveTorrent,
+        setTorrentPaused,
+        saveTorrentToLibrary as apiSaveTorrentToLibrary,
+      } from './js/api.js';
 
       // ---- DOM refs
       const gridEl = document.getElementById('grid');
@@ -2990,84 +3005,22 @@
         }
       });
 
+      // Drives the upload-progress UI strip; delegates the actual XHR to api.js.
       const uploadVideo = (file) => {
-        return new Promise((resolve, reject) => {
-          const formData = new FormData();
-          formData.append('file', file);
-
-          progressEl.classList.add('active');
-          progressName.textContent = cleanName(file.name) || 'Uploading';
-          progressFill.style.width = '0%';
-          progressPercent.textContent = '0%';
-
-          const xhr = new XMLHttpRequest();
-          xhr.upload.addEventListener('progress', (e) => {
-            if (e.lengthComputable) {
-              const pct = (e.loaded / e.total) * 100;
-              progressFill.style.width = `${pct}%`;
-              progressPercent.textContent = `${Math.round(pct)}%`;
-            }
-          });
-          xhr.addEventListener('load', () => {
-            if (xhr.status >= 200 && xhr.status < 300) {
-              try {
-                resolve(JSON.parse(xhr.responseText));
-              } catch {
-                resolve({});
-              }
-            } else {
-              reject(new Error('Upload failed: ' + xhr.responseText));
-            }
-          });
-          xhr.addEventListener('error', () => reject(new Error('Upload failed — is the server running?')));
-          xhr.open('POST', `${API}/upload`);
-          xhr.send(formData);
+        progressEl.classList.add('active');
+        progressName.textContent = cleanName(file.name) || 'Uploading';
+        progressFill.style.width = '0%';
+        progressPercent.textContent = '0%';
+        return apiUploadVideo(file, (ratio) => {
+          const pct = ratio * 100;
+          progressFill.style.width = `${pct}%`;
+          progressPercent.textContent = `${Math.round(pct)}%`;
         });
       };
-
-      const uploadSubtitle = (file, videoName, lang) => {
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('videoName', videoName);
-        if (lang) formData.append('lang', lang);
-        return fetch(`${API}/upload-subtitles`, { method: 'POST', body: formData }).then((r) => {
-          if (!r.ok) throw new Error('Subtitle upload failed');
-          return r.json();
-        });
-      };
-
-      const uploadPosterFile = (file, videoName) => {
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('videoName', videoName);
-        return fetch(`${API}/upload-poster`, { method: 'POST', body: formData }).then(async (r) => {
-          if (!r.ok) {
-            const body = await r.json().catch(() => ({}));
-            throw new Error(body.error || 'Poster upload failed');
-          }
-          return r.json();
-        });
-      };
-
-      const fetchTmdbPoster = (posterPath, videoName, tmdbId) =>
-        fetch(`${API}/tmdb/fetch-poster`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ posterPath, videoName, tmdbId }),
-        }).then(async (r) => {
-          if (!r.ok) {
-            const body = await r.json().catch(() => ({}));
-            throw new Error(body.error || 'TMDB poster fetch failed');
-          }
-          return r.json();
-        });
-
-      const deletePoster = (videoName) =>
-        fetch(`${API}/poster/${encodeURIComponent(videoName)}`, { method: 'DELETE' });
 
       const applyPoster = async (poster, videoName) => {
-        if (poster.kind === 'file') return uploadPosterFile(poster.file, videoName);
-        if (poster.kind === 'tmdb') return fetchTmdbPoster(poster.posterPath, videoName, poster.tmdbId);
+        if (poster.kind === 'file') return uploadPoster(poster.file, videoName);
+        if (poster.kind === 'tmdb') return tmdbFetchPoster(poster.posterPath, videoName, poster.tmdbId);
       };
 
       // ---- Status toast (TMDB backfill + other background work)
@@ -3093,13 +3046,7 @@
       // ---- TMDB picker
       const ensureTmdbStatus = async () => {
         if (tmdbConfigured !== null) return tmdbConfigured;
-        try {
-          const r = await fetch(`${API}/tmdb/status`);
-          const data = await r.json();
-          tmdbConfigured = Boolean(data.configured);
-        } catch {
-          tmdbConfigured = false;
-        }
+        tmdbConfigured = await tmdbStatus();
         return tmdbConfigured;
       };
 
@@ -3147,12 +3094,7 @@
         tmdbResults.innerHTML = `<div class="tmdb-empty">Searching…</div>`;
         posterActions.style.display = 'none';
         try {
-          const r = await fetch(`${API}/tmdb/search?q=${encodeURIComponent(q)}`);
-          if (!r.ok) {
-            const body = await r.json().catch(() => ({}));
-            throw new Error(body.error || `HTTP ${r.status}`);
-          }
-          const data = await r.json();
+          const data = await tmdbSearch(q);
           renderTmdbResults(data.results || []);
         } catch (err) {
           tmdbResults.innerHTML = `<div class="tmdb-empty">${escapeHtml(err.message)}</div>`;
@@ -3174,8 +3116,7 @@
         // Prefill cleaned query from filename
         try {
           if (filename) {
-            const r = await fetch(`${API}/tmdb/suggest-query?filename=${encodeURIComponent(filename)}`);
-            const data = await r.json();
+            const data = await tmdbSuggestQuery(filename);
             tmdbQuery.value = data.query || cleanName(filename);
           } else {
             tmdbQuery.value = '';
@@ -3198,7 +3139,7 @@
         if (posterEditorMode) {
           posterCommit.disabled = true;
           try {
-            await fetchTmdbPoster(posterTmdbSelected.posterPath, posterEditorMode.videoName);
+            await tmdbFetchPoster(posterTmdbSelected.posterPath, posterEditorMode.videoName);
             closeModal(posterModal);
             // If the TMDB picker was opened from the per-card edit modal,
             // refresh its poster preview so the change shows without reopen.
@@ -3240,15 +3181,6 @@
         });
       };
 
-      const fetchSubtitlesForVideo = async (videoName) => {
-        try {
-          const r = await fetch(`${API}/subtitles/${encodeURIComponent(videoName)}`);
-          return r.ok ? await r.json() : [];
-        } catch {
-          return [];
-        }
-      };
-
       const renderEditPoster = (videoName, posterUrl) => {
         if (posterUrl) {
           editPosterPreview.innerHTML = `<img src="${API}${posterUrl}?t=${Date.now()}" alt=""/>`;
@@ -3274,10 +3206,7 @@
           row.querySelector('.edit-sub-row-remove').addEventListener('click', async () => {
             if (!confirm(`Delete subtitle "${s.name}"?`)) return;
             try {
-              const r = await fetch(
-                `${API}/subtitles/${encodeURIComponent(editing.videoName)}/${encodeURIComponent(s.name)}`,
-                { method: 'DELETE' }
-              );
+              const r = await deleteSubtitle(editing.videoName, s.name);
               if (!r.ok) throw new Error('Delete failed');
               await refreshEditSubList();
             } catch (err) {
@@ -3289,7 +3218,7 @@
       };
 
       const refreshEditSubList = async () => {
-        const subs = await fetchSubtitlesForVideo(editing.videoName);
+        const subs = await fetchSubtitles(editing.videoName);
         renderEditSubList(subs);
       };
 
@@ -3299,7 +3228,7 @@
       const refreshEditProbe = async () => {
         editProbe.textContent = 'Probing…';
         try {
-          const r = await fetch(`${API}/videos/${encodeURIComponent(editing.videoName)}/probe`);
+          const r = await probeVideo(editing.videoName);
           if (!r.ok) {
             editProbe.textContent = 'Could not probe video file.';
             return;
@@ -3336,9 +3265,7 @@
         // /videos returns the canonical poster URL, including a fresh
         // mtime-based query string. Re-fetch instead of guessing.
         try {
-          const r = await fetch(`${API}/videos`);
-          if (!r.ok) return;
-          const list = await r.json();
+          const list = await fetchVideos();
           const v = list.find((x) => x.name === editing.videoName);
           renderEditPoster(editing.videoName, v && v.poster);
         } catch {}
@@ -3375,14 +3302,13 @@
         editSubLang.value = 'en';
         // Find this video in the most recent /videos response for the poster
         // and the watched/metadata flags.
-        const r = await fetch(`${API}/videos`).catch(() => null);
-        const list = r && r.ok ? await r.json() : [];
+        const list = await fetchVideos().catch(() => []);
         const v = list.find((x) => x.name === videoName) || {};
         renderEditPoster(videoName, v.poster);
         editWatched.checked = Boolean(v.watched);
         editWatchedLabel.textContent = v.watched ? 'Watched' : 'Not watched';
         renderEditDetails(v);
-        const subs = await fetchSubtitlesForVideo(videoName);
+        const subs = await fetchSubtitles(videoName);
         renderEditSubList(subs);
         refreshEditProbe();
         openModal(editModal);
@@ -3396,15 +3322,7 @@
       // grid so the corner badge shows up immediately.
       const setWatched = async (videoName, watched) => {
         try {
-          const r = await fetch(`${API}/videos/${encodeURIComponent(videoName)}/metadata`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ watched }),
-          });
-          if (!r.ok) {
-            const body = await r.json().catch(() => ({}));
-            throw new Error(body.error || `HTTP ${r.status}`);
-          }
+          await patchVideoMetadata(videoName, { watched });
           loadVideos();
         } catch (err) {
           console.warn('setWatched failed', err);
@@ -3425,11 +3343,7 @@
         const originalLabel = editReprocess.textContent;
         editReprocess.textContent = 'Re-processing…';
         try {
-          const r = await fetch(`${API}/videos/${encodeURIComponent(editing.videoName)}/reprocess`, {
-            method: 'POST',
-          });
-          const body = await r.json().catch(() => ({}));
-          if (!r.ok) throw new Error(body.error || 'Re-process failed');
+          const body = await reprocessVideo(editing.videoName);
           // The video filename may have changed (.mkv → .mp4). Track the
           // new name so subsequent edit-modal actions target it.
           editing.videoName = body.name;
@@ -3455,13 +3369,7 @@
         if (!newName || newName === cleanName(editing.videoName)) return;
         editNameSave.disabled = true;
         try {
-          const r = await fetch(`${API}/videos/${encodeURIComponent(editing.videoName)}/rename`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ newName }),
-          });
-          const body = await r.json().catch(() => ({}));
-          if (!r.ok) throw new Error(body.error || 'Rename failed');
+          const body = await renameVideo(editing.videoName, newName);
           editing.videoName = body.name;
           editModalSub.textContent = cleanName(body.name);
           editName.value = cleanName(body.name);
@@ -3484,7 +3392,7 @@
           const file = input.files && input.files[0];
           if (!file) return;
           try {
-            await uploadPosterFile(file, editing.videoName);
+            await uploadPoster(file, editing.videoName);
             await refreshEditPoster();
             loadVideos();
           } catch (err) {
@@ -3807,11 +3715,7 @@
         // Continue Watching shelf can render an accurate progress bar
         // without re-probing every file server-side. Fire-and-forget.
         if (currentLocalVideo && Number.isFinite(playerEl.duration) && playerEl.duration > 0) {
-          fetch(`${API}/videos/${encodeURIComponent(currentLocalVideo)}/metadata`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ duration: playerEl.duration }),
-          }).catch(() => {});
+          patchVideoMetadata(currentLocalVideo, { duration: playerEl.duration }).catch(() => {});
         }
       });
 
@@ -4068,11 +3972,7 @@
         const nearEnd = t > playerEl.duration - 5;
         const nearStart = t < 5;
         const value = (nearEnd || nearStart) ? null : t;
-        fetch(`${API}/videos/${encodeURIComponent(currentLocalVideo)}/metadata`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ resumePosition: value }),
-        }).catch(() => {});
+        patchVideoMetadata(currentLocalVideo, { resumePosition: value }).catch(() => {});
       };
 
       const maybeMarkWatched = () => {
@@ -4111,12 +4011,8 @@
           const value = (t < 5 || t > playerEl.duration - 5) ? null : t;
           // Force a save by clearing the debounce.
           resumeSaveTimer = 0;
-          fetch(`${API}/videos/${encodeURIComponent(currentLocalVideo)}/metadata`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ resumePosition: value }),
-            keepalive: true,
-          }).catch(() => {});
+          patchVideoMetadata(currentLocalVideo, { resumePosition: value }, { keepalive: true })
+            .catch(() => {});
         }
         playerEl.pause();
         playerEl.querySelectorAll('track').forEach((t) => t.remove());
@@ -4154,22 +4050,18 @@
         // Subtitles + resume position fetched in parallel.
         let resumeSec = null;
         try {
-          const [subRes, listRes] = await Promise.all([
-            fetch(`${API}/subtitles/${encodeURIComponent(filename)}`),
-            fetch(`${API}/videos`),
+          const [subs, list] = await Promise.all([
+            fetchSubtitles(filename),
+            fetchVideos().catch(() => []),
           ]);
-          const subs = subRes.ok ? await subRes.json() : [];
           const tracks = subs.map((s) => ({
             url: `${API}${s.url}`,
             label: s.label,
             lang: s.lang,
           }));
           applySubtitles(tracks);
-          if (listRes.ok) {
-            const list = await listRes.json();
-            const v = list.find((x) => x.name === filename);
-            if (v && typeof v.resumePosition === 'number') resumeSec = v.resumePosition;
-          }
+          const v = list.find((x) => x.name === filename);
+          if (v && typeof v.resumePosition === 'number') resumeSec = v.resumePosition;
         } catch {
           applySubtitles([]);
         }
@@ -4207,9 +4099,7 @@
       // ---- Library
       const deleteVideo = async (filename) => {
         if (!confirm(`Delete "${cleanName(filename)}"?`)) return;
-        const res = await fetch(`${API}/videos/${encodeURIComponent(filename)}`, {
-          method: 'DELETE',
-        });
+        const res = await apiDeleteVideo(filename);
         if (res.ok) loadVideos();
         else alert('Failed to delete');
       };
@@ -4451,8 +4341,7 @@
 
       const loadVideos = async () => {
         try {
-          const res = await fetch(`${API}/videos`);
-          libraryCache = await res.json();
+          libraryCache = await fetchVideos();
           renderGenrePills(libraryCache);
           renderLibrary();
         } catch {
@@ -4533,25 +4422,19 @@
       };
 
       const togglePauseTorrent = async (infoHash, isPaused, btn) => {
-        const action = isPaused ? 'resume' : 'pause';
         btn.disabled = true;
         try {
-          const res = await fetch(`${API}/torrent/${infoHash}/${action}`, { method: 'POST' });
-          if (!res.ok) {
-            const body = await res.json().catch(() => ({}));
-            throw new Error(body.error || `HTTP ${res.status}`);
-          }
+          await setTorrentPaused(infoHash, !isPaused);
           loadTorrents();
         } catch (err) {
-          alert(`Failed to ${action}: ${err.message}`);
+          alert(`Failed to ${isPaused ? 'resume' : 'pause'}: ${err.message}`);
           btn.disabled = false;
         }
       };
 
       const loadTorrents = async () => {
         try {
-          const res = await fetch(`${API}/torrents`);
-          const torrents = await res.json();
+          const torrents = await fetchTorrents();
           torrentGridEl.innerHTML = '';
           if (!torrents.length) {
             torrentEmpty.style.display = 'flex';
@@ -4575,15 +4458,7 @@
         }
         addTorrentBtn.disabled = true;
         try {
-          const res = await fetch(`${API}/torrent`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ magnet }),
-          });
-          if (!res.ok) {
-            const body = await res.json().catch(() => ({}));
-            throw new Error(body.error || 'Failed to add torrent');
-          }
+          await addTorrentMagnet(magnet);
           magnetInput.value = '';
           loadTorrents();
         } catch (err) {
@@ -4596,7 +4471,7 @@
       const removeTorrent = async (infoHash) => {
         if (!confirm('Remove this torrent?')) return;
         try {
-          await fetch(`${API}/torrent/${infoHash}`, { method: 'DELETE' });
+          await apiRemoveTorrent(infoHash);
           loadTorrents();
         } catch {
           alert('Failed to remove');
@@ -4627,13 +4502,7 @@
         const timer = setInterval(render, 1000);
 
         try {
-          const res = await fetch(`${API}/torrent/${t.infoHash}/save-to-library`, {
-            method: 'POST',
-          });
-          if (!res.ok) {
-            const body = await res.json().catch(() => ({}));
-            throw new Error(body.error || `HTTP ${res.status}`);
-          }
+          await apiSaveTorrentToLibrary(t.infoHash);
           await Promise.all([loadTorrents(), loadVideos()]);
           // On success the torrent card is re-rendered or removed entirely,
           // so we don't need to reset btn state.
@@ -4660,9 +4529,8 @@
         if (!libraryCache.some((v) => !v.tmdbId)) return;
         showStatusToast('Looking up film details…');
         try {
-          const r = await fetch(`${API}/tmdb/backfill`, { method: 'POST' });
-          const summary = await r.json().catch(() => ({}));
-          if (!r.ok) {
+          const { ok, body: summary } = await tmdbBackfill();
+          if (!ok) {
             showStatusToast(summary.error || 'TMDB lookup failed', { state: 'done', autoHideMs: 4000 });
             return;
           }
