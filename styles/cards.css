@@ -34,6 +34,18 @@
   aspect-ratio: 2 / 3;
 }
 
+/* Older smart-TV browsers (pre-Chromium 88 / Safari 15) don't support
+   aspect-ratio. Without a height, the absolutely-positioned .card inside
+   collapses to 0 and the library appears empty. Padding-top hack gives
+   the slot a 2:3 height (3 / 2 = 150%). No-op on modern browsers. */
+@supports not (aspect-ratio: 1) {
+  .card-slot::before {
+    content: "";
+    display: block;
+    padding-top: 150%;
+  }
+}
+
 .card {
   position: absolute;
   top: 50%;

@@ -564,6 +564,15 @@
   background: #1a1820;
 }
 
+/* aspect-ratio fallback for older smart-TV browsers — see cards.css. */
+@supports not (aspect-ratio: 1) {
+  .tmdb-poster::before {
+    content: "";
+    display: block;
+    padding-top: 150%;
+  }
+}
+
 .tmdb-meta {
   padding: 10px 12px;
   font-family: 'DM Sans', sans-serif;
