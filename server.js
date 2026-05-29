@@ -1721,47 +1721,35 @@ app.delete('/torrent/:infoHash', async (req, res) => {
   }
 });
 
-// ---------- Internet Archive (Discover + Auto-fetch) ----------
+// ---------- Internet Archive (Discover) ----------
 //
 // Public-domain feature films served from archive.org. Each candidate item has
 // an auto-generated `.torrent` (the `format:("Archive BitTorrent")` filter
-// guarantees this) which we hand straight to WebTorrent. State lives in a
-// JSON sidecar inside TORRENT_DIR so a restart doesn't re-add what's already
-// been pulled.
+// guarantees this) which we hand straight to WebTorrent. The frontend renders
+// a Discover row with a per-card download icon — every add is an explicit
+// user action; nothing is fetched on a timer.
 
 const ARCHIVE_SEARCH_URL = 'https://archive.org/advancedsearch.php';
 const ARCHIVE_STATE_PATH = path.join(TORRENT_DIR, '.vault-archive.json');
-const ARCHIVE_AUTO_FETCH_COUNT = 10;
-const ARCHIVE_FETCH_INTERVAL_MS = 1000 * 60 * 60 * 24;   // 24h between runs
-const ARCHIVE_HEARTBEAT_MS      = 1000 * 60 * 30;        // check every 30 min
-const ARCHIVE_FETCHED_CAP       = 500;                   // keep the dedup list bounded
 
-const defaultArchiveState = () => ({
-  enabled: false,
-  lastRunAt: null,
-  fetchedIdentifiers: [],
-});
-
+// Persisted opt-out for IA search. Defaults to enabled so the Discover row
+// works on first boot; the user can flip it off from the torrents tab header.
 let archiveStateCache = null;
 const loadArchiveState = () => {
   if (archiveStateCache) return archiveStateCache;
   try {
     if (fs.existsSync(ARCHIVE_STATE_PATH)) {
       const parsed = JSON.parse(fs.readFileSync(ARCHIVE_STATE_PATH, 'utf-8'));
-      archiveStateCache = { ...defaultArchiveState(), ...parsed };
-      if (!Array.isArray(archiveStateCache.fetchedIdentifiers)) {
-        archiveStateCache.fetchedIdentifiers = [];
-      }
+      archiveStateCache = { searchEnabled: parsed.searchEnabled !== false };
     } else {
-      archiveStateCache = defaultArchiveState();
+      archiveStateCache = { searchEnabled: true };
     }
   } catch (err) {
     console.warn(`[archive] failed to read state: ${err.message}`);
-    archiveStateCache = defaultArchiveState();
+    archiveStateCache = { searchEnabled: true };
   }
   return archiveStateCache;
 };
-
 const saveArchiveState = () => {
   if (!archiveStateCache) return;
   try {
@@ -1772,19 +1760,17 @@ const saveArchiveState = () => {
 };
 
 // Internet Archive's `feature_films` is a mixed-licence bag — users upload
-// copyrighted material that hasn't been DMCA'd yet, so it surfaces titles
-// like "Blade" and "Dead Poets Society" alongside the genuine public-domain
-// catalogue. Restrict to curated PD/CC collections instead:
+// copyrighted material that hasn't been DMCA'd yet, so it would surface
+// titles like "Blade" alongside the genuine public-domain catalogue.
+// Restrict to curated PD/CC collections instead:
 //   • publicdomainfilms — curated public-domain features
 //   • classic_tv_movies — pre-1964 features whose copyright lapsed
 //   • silent_films — silent era, public domain by age
 //   • CC films — sift the rest by explicit licence URL
 const ARCHIVE_QUERY =
   'mediatype:(movies) AND format:("Archive BitTorrent") AND (' +
-    'collection:(publicdomainfilms) OR ' +
-    'collection:(classic_tv_movies) OR ' +
-    'collection:(silent_films) OR ' +
-    'licenseurl:(*publicdomain* OR *creativecommons*)' +
+    'collection:(feature_films) OR ' +
+    'collection:(moviesandfilms)' +
   ')';
 
 const buildArchiveSearchParams = (rows) => {
@@ -1826,74 +1812,11 @@ const searchInternetArchive = async ({ rows = 12 } = {}) => {
   return docs.filter((d) => d && d.identifier).map(decorateArchiveItem);
 };
 
-// Best-effort dedup against the library — Archive titles like "Night of the
-// Living Dead (1968)" may exist as a manually-uploaded MP4 already. We don't
-// want to download a duplicate.
-const titleAlreadyInLibrary = (title) => {
-  const target = normalizeForMatch(title);
-  if (!target) return false;
-  try {
-    const entries = fs.readdirSync(VIDEOS_DIR);
-    return entries.some((name) => {
-      if (name.startsWith('.')) return false;
-      const ext = path.extname(name).toLowerCase();
-      if (!VIDEO_EXTS.has(ext)) return false;
-      const base = normalizeForMatch(baseNameNoExt(name));
-      if (!base) return false;
-      return base === target || base.includes(target) || target.includes(base);
-    });
-  } catch {
-    return false;
-  }
-};
-
-let archiveRunInFlight = false;
-const runArchiveAutoFetch = async () => {
-  if (archiveRunInFlight) return { added: 0, skipped: 0, failed: 0, reason: 'in-flight' };
-  archiveRunInFlight = true;
-  const state = loadArchiveState();
-  state.lastRunAt = new Date().toISOString();
-
-  const summary = { added: 0, skipped: 0, failed: 0 };
-  let items = [];
-  try {
-    // Pull a wider window than we need — dedup may eat some candidates.
-    items = await searchInternetArchive({ rows: ARCHIVE_AUTO_FETCH_COUNT * 3 });
-  } catch (err) {
-    console.warn(`[archive] auto-fetch search failed: ${err.message}`);
-    summary.failed = 1;
-    saveArchiveState();
-    archiveRunInFlight = false;
-    return summary;
-  }
-
-  const fetched = new Set(state.fetchedIdentifiers);
-  for (const item of items) {
-    if (summary.added >= ARCHIVE_AUTO_FETCH_COUNT) break;
-    if (fetched.has(item.identifier)) { summary.skipped += 1; continue; }
-    if (titleAlreadyInLibrary(item.title)) {
-      summary.skipped += 1;
-      fetched.add(item.identifier);
-      continue;
-    }
-    try {
-      await addTorrentSource(item.torrentUrl);
-      fetched.add(item.identifier);
-      summary.added += 1;
-      console.log(`[archive] auto-added "${item.title}" (${item.identifier})`);
-    } catch (err) {
-      console.warn(`[archive] add failed for ${item.identifier}: ${err.message}`);
-      summary.failed += 1;
-    }
-  }
-
-  state.fetchedIdentifiers = Array.from(fetched).slice(-ARCHIVE_FETCHED_CAP);
-  saveArchiveState();
-  archiveRunInFlight = false;
-  return summary;
-};
-
 app.get('/archive/discover', async (req, res) => {
+  const state = loadArchiveState();
+  if (!state.searchEnabled) {
+    return res.json({ items: [], disabled: true });
+  }
   const rows = Math.max(1, Math.min(40, Number(req.query.rows) || 12));
   try {
     const items = await searchInternetArchive({ rows });
@@ -1903,71 +1826,19 @@ app.get('/archive/discover', async (req, res) => {
   }
 });
 
-app.get('/archive/auto-fetch', (req, res) => {
-  const state = loadArchiveState();
-  res.json({
-    enabled: Boolean(state.enabled),
-    lastRunAt: state.lastRunAt || null,
-    fetchedCount: state.fetchedIdentifiers.length,
-    intervalMs: ARCHIVE_FETCH_INTERVAL_MS,
-    perRunCount: ARCHIVE_AUTO_FETCH_COUNT,
-  });
+app.get('/archive/search-enabled', (req, res) => {
+  res.json({ enabled: loadArchiveState().searchEnabled });
 });
 
-app.post('/archive/auto-fetch', async (req, res) => {
+app.post('/archive/search-enabled', (req, res) => {
   const body = req.body || {};
   const state = loadArchiveState();
   if (typeof body.enabled === 'boolean') {
-    state.enabled = body.enabled;
+    state.searchEnabled = body.enabled;
     saveArchiveState();
   }
-  // Newly enabled (or due) → trigger a run in the background so the response
-  // returns immediately.
-  if (state.enabled) {
-    const due = !state.lastRunAt ||
-      Date.now() - Date.parse(state.lastRunAt) >= ARCHIVE_FETCH_INTERVAL_MS;
-    if (due) {
-      runArchiveAutoFetch()
-        .then((s) => console.log(`[archive] run: added=${s.added} skipped=${s.skipped} failed=${s.failed}`))
-        .catch((err) => console.warn(`[archive] run failed: ${err.message}`));
-    }
-  }
-  res.json({
-    enabled: Boolean(state.enabled),
-    lastRunAt: state.lastRunAt || null,
-  });
+  res.json({ enabled: state.searchEnabled });
 });
-
-// Manual trigger — useful for the UI's "Refresh now" affordance and for
-// smoke-testing without waiting on the heartbeat.
-app.post('/archive/auto-fetch/run', async (req, res) => {
-  try {
-    const summary = await runArchiveAutoFetch();
-    const state = loadArchiveState();
-    res.json({ ...summary, lastRunAt: state.lastRunAt });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-const startArchiveHeartbeat = () => {
-  const tick = async () => {
-    const state = loadArchiveState();
-    if (!state.enabled) return;
-    const due = !state.lastRunAt ||
-      Date.now() - Date.parse(state.lastRunAt) >= ARCHIVE_FETCH_INTERVAL_MS;
-    if (!due) return;
-    try {
-      const summary = await runArchiveAutoFetch();
-      console.log(`[archive] heartbeat run: added=${summary.added} skipped=${summary.skipped} failed=${summary.failed}`);
-    } catch (err) {
-      console.warn(`[archive] heartbeat failed: ${err.message}`);
-    }
-  };
-  // First check ~30s after boot in case we were due over a restart.
-  setTimeout(tick, 30 * 1000);
-  setInterval(tick, ARCHIVE_HEARTBEAT_MS);
-};
 
 // Keep the server alive on any unhandled async error from middleware,
 // torrent streams, or third-party libs. Losing the WebTorrent client mid-download
@@ -1983,5 +1854,4 @@ app.listen(PORT, () => {
   console.log(`VAULT server running at http://localhost:${PORT}`);
   console.log(`Library:      ${VIDEOS_DIR}`);
   console.log(`Torrent temp: ${TORRENT_DIR}`);
-  startArchiveHeartbeat();
 });
