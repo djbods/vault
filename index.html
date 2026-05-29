@@ -922,6 +922,164 @@
         background: rgba(212, 160, 74, 0.03);
       }
 
+      /* Auto-fetch toggle strip in the torrents tab header */
+      .archive-auto {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        padding: 16px 20px;
+        margin-bottom: 24px;
+        background: var(--surface);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: 3px;
+        max-width: 920px;
+      }
+
+      .archive-auto-title {
+        font-family: 'DM Sans', sans-serif;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text);
+        letter-spacing: 0.02em;
+      }
+
+      .archive-auto-sub {
+        font-family: 'DM Sans', sans-serif;
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--text-faint);
+        margin-top: 4px;
+      }
+
+      .archive-auto[data-on='true'] .archive-auto-sub {
+        color: var(--gold);
+      }
+
+      .switch {
+        position: relative;
+        display: inline-block;
+        width: 42px;
+        height: 22px;
+        flex: 0 0 auto;
+        cursor: pointer;
+      }
+      .switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+      .switch-track {
+        position: absolute;
+        inset: 0;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 999px;
+        transition: background 0.25s ease, border-color 0.25s ease;
+      }
+      .switch-track::before {
+        content: '';
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 16px;
+        height: 16px;
+        background: var(--text-faint);
+        border-radius: 50%;
+        transition: transform 0.25s ease, background 0.25s ease;
+      }
+      .switch input:checked + .switch-track {
+        background: rgba(212, 160, 74, 0.18);
+        border-color: var(--gold);
+      }
+      .switch input:checked + .switch-track::before {
+        transform: translateX(20px);
+        background: var(--gold);
+      }
+      .switch input:disabled + .switch-track {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      /* Discover shelf cards — slimmer than library cards, click to add */
+      .d-card {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        background: var(--surface);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: 3px;
+        overflow: hidden;
+        cursor: pointer;
+        transition: border-color 0.25s ease, transform 0.25s ease;
+      }
+      .d-card:hover {
+        border-color: var(--border-strong);
+        transform: translateY(-2px);
+      }
+      .d-card[data-state='added'],
+      .d-card[data-state='adding'] {
+        cursor: default;
+        pointer-events: none;
+      }
+      .d-card[data-state='added'] { opacity: 0.6; }
+      .d-card-poster {
+        width: 100%;
+        aspect-ratio: 2 / 3;
+        background: rgba(0, 0, 0, 0.4);
+        object-fit: cover;
+        display: block;
+      }
+      .d-card-info {
+        padding: 12px 14px 14px;
+      }
+      .d-card-title {
+        font-family: 'Playfair Display', serif;
+        font-weight: 500;
+        font-size: 14px;
+        line-height: 1.3;
+        margin: 0 0 6px;
+        color: var(--text);
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .d-card-meta {
+        font-family: 'DM Sans', sans-serif;
+        font-size: 10px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--text-faint);
+        display: flex;
+        gap: 10px;
+      }
+      .d-card-state {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        font-family: 'DM Sans', sans-serif;
+        font-size: 10px;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        padding: 4px 8px;
+        background: rgba(8, 7, 10, 0.85);
+        color: var(--gold);
+        border: 1px solid var(--gold);
+        border-radius: 2px;
+        display: none;
+      }
+      .d-card[data-state='adding'] .d-card-state,
+      .d-card[data-state='added'] .d-card-state,
+      .d-card[data-state='error'] .d-card-state {
+        display: block;
+      }
+      .d-card[data-state='error'] .d-card-state {
+        color: var(--danger);
+        border-color: var(--danger);
+      }
+
       .empty {
         display: flex;
         flex-direction: column;
@@ -2339,6 +2497,17 @@
         </section>
 
         <section class="view" id="viewTorrents">
+          <div class="archive-auto" id="archiveAuto" data-on="false">
+            <div>
+              <div class="archive-auto-title">Auto-fetch popular from Internet Archive</div>
+              <div class="archive-auto-sub" id="archiveAutoStatus">Off</div>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="archiveAutoToggle" />
+              <span class="switch-track"></span>
+            </label>
+          </div>
+
           <div class="magnet-row">
             <input
               type="text"
@@ -2350,6 +2519,15 @@
             />
             <button class="upload-btn" id="addTorrentBtn">+ &nbsp;Add</button>
           </div>
+
+          <section class="shelf" id="discoverShelf" hidden>
+            <header class="shelf-head">
+              <h2 class="shelf-title">Discover on Internet Archive</h2>
+              <span class="shelf-count" id="discoverShelfCount"></span>
+            </header>
+            <div class="shelf-row" id="discoverShelfRow"></div>
+          </section>
+
           <div class="section-label">Active Torrents</div>
           <div class="grid" id="torrentGrid"></div>
           <div class="empty" id="torrentEmpty" style="display: none">
@@ -2739,6 +2917,12 @@
       const openUploadBtn = document.getElementById('openUpload');
       const magnetInput = document.getElementById('magnetInput');
       const addTorrentBtn = document.getElementById('addTorrentBtn');
+      const archiveAutoEl = document.getElementById('archiveAuto');
+      const archiveAutoToggle = document.getElementById('archiveAutoToggle');
+      const archiveAutoStatus = document.getElementById('archiveAutoStatus');
+      const discoverShelf = document.getElementById('discoverShelf');
+      const discoverShelfRow = document.getElementById('discoverShelfRow');
+      const discoverShelfCount = document.getElementById('discoverShelfCount');
 
       // ---- State
       let currentTab = 'library';
@@ -2803,6 +2987,8 @@
 
         if (name === 'torrents') {
           loadTorrents();
+          loadArchiveAutoFetch();
+          loadDiscover();
           if (!torrentPollTimer) torrentPollTimer = setInterval(loadTorrents, 1500);
         } else {
           if (torrentPollTimer) {
@@ -4706,6 +4892,137 @@
       addTorrentBtn.addEventListener('click', addTorrent);
       magnetInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') addTorrent();
+      });
+
+      // ---- Internet Archive: Discover + auto-fetch
+
+      // Coarse "how long ago" for the auto-fetch status line. We don't need
+      // minute-level precision — the run cadence is daily.
+      const formatRelative = (iso) => {
+        if (!iso) return 'never';
+        const ms = Date.now() - Date.parse(iso);
+        if (!Number.isFinite(ms) || ms < 0) return 'just now';
+        const min = Math.floor(ms / 60000);
+        if (min < 1) return 'just now';
+        if (min < 60) return `${min}m ago`;
+        const hr = Math.floor(min / 60);
+        if (hr < 24) return `${hr}h ago`;
+        const days = Math.floor(hr / 24);
+        return `${days}d ago`;
+      };
+
+      const renderDiscoverCard = (item) => {
+        const card = document.createElement('div');
+        card.className = 'd-card';
+        card.dataset.state = 'idle';
+        // Tiny inline SVG fallback for items whose poster service returns 404
+        // (some Archive items have no thumbnail). Swallows the broken-image icon.
+        const fallback = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 2 3'%3E%3Crect width='2' height='3' fill='%23111017'/%3E%3C/svg%3E";
+        card.innerHTML = `
+          <img class="d-card-poster" src="${escapeHtml(item.posterUrl)}" alt="" loading="lazy" onerror="this.src='${fallback}'; this.onerror=null;" />
+          <div class="d-card-info">
+            <h3 class="d-card-title">${escapeHtml(item.title)}</h3>
+            <div class="d-card-meta">
+              ${item.year ? `<span>${escapeHtml(String(item.year))}</span>` : ''}
+              <span>${(item.downloads || 0).toLocaleString()} dl</span>
+            </div>
+          </div>
+          <div class="d-card-state"></div>
+        `;
+        const stateEl = card.querySelector('.d-card-state');
+        card.addEventListener('click', async () => {
+          if (card.dataset.state !== 'idle') return;
+          card.dataset.state = 'adding';
+          stateEl.textContent = 'Adding…';
+          try {
+            const res = await fetch(`${API}/torrent`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ torrentUrl: item.torrentUrl }),
+            });
+            if (!res.ok) {
+              const body = await res.json().catch(() => ({}));
+              throw new Error(body.error || `HTTP ${res.status}`);
+            }
+            card.dataset.state = 'added';
+            stateEl.textContent = 'Added';
+            loadTorrents();
+          } catch (err) {
+            card.dataset.state = 'error';
+            stateEl.textContent = 'Failed';
+            stateEl.title = err.message;
+            // Allow retry after 2s
+            setTimeout(() => {
+              card.dataset.state = 'idle';
+              stateEl.textContent = '';
+              stateEl.removeAttribute('title');
+            }, 2000);
+          }
+        });
+        return card;
+      };
+
+      const loadDiscover = async () => {
+        try {
+          const res = await fetch(`${API}/archive/discover?rows=12`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const { items } = await res.json();
+          if (!items || !items.length) {
+            discoverShelf.hidden = true;
+            return;
+          }
+          discoverShelf.hidden = false;
+          discoverShelfRow.innerHTML = '';
+          items.forEach((item) => discoverShelfRow.appendChild(renderDiscoverCard(item)));
+          discoverShelfCount.textContent = `${items.length} films`;
+        } catch (err) {
+          // Soft-fail — the rest of the torrent tab should still work if
+          // archive.org is unreachable.
+          discoverShelf.hidden = true;
+          console.warn('[discover]', err.message);
+        }
+      };
+
+      const setArchiveAutoUI = ({ enabled, lastRunAt }) => {
+        archiveAutoToggle.checked = Boolean(enabled);
+        archiveAutoEl.dataset.on = String(Boolean(enabled));
+        archiveAutoStatus.textContent = enabled
+          ? `On · Last run ${formatRelative(lastRunAt)}`
+          : 'Off';
+      };
+
+      const loadArchiveAutoFetch = async () => {
+        try {
+          const res = await fetch(`${API}/archive/auto-fetch`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+          setArchiveAutoUI(data);
+        } catch (err) {
+          console.warn('[archive auto-fetch]', err.message);
+        }
+      };
+
+      archiveAutoToggle.addEventListener('change', async () => {
+        const enabled = archiveAutoToggle.checked;
+        archiveAutoToggle.disabled = true;
+        try {
+          const res = await fetch(`${API}/archive/auto-fetch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled }),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+          setArchiveAutoUI(data);
+          // Newly enabled triggers a background run — poll torrents so the
+          // user sees new cards appear without waiting on the regular tick.
+          if (enabled) setTimeout(loadTorrents, 1200);
+        } catch (err) {
+          alert('Failed to update auto-fetch: ' + err.message);
+          archiveAutoToggle.checked = !enabled;
+        } finally {
+          archiveAutoToggle.disabled = false;
+        }
       });
 
       // ---- Boot
