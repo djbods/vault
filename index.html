@@ -922,86 +922,42 @@
         background: rgba(212, 160, 74, 0.03);
       }
 
-      /* Toggle strip controlling whether vault queries Internet Archive at
-         all — when off, the Discover shelf is hidden and no requests are
-         made to archive.org. */
+      /* Internet Archive search bar — type a query and scrape results into
+         the Discover shelf below. Mirrors the magnet-row layout. */
       .archive-search {
         display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 24px;
-        padding: 16px 20px;
+        gap: 12px;
         margin-bottom: 24px;
-        background: var(--surface);
-        border: 1px solid rgba(255, 255, 255, 0.05);
-        border-radius: 3px;
         max-width: 920px;
       }
 
-      .archive-search-title {
+      /* Scrape-in-progress / no-results / error status under the search bar.
+         The scrape takes a few seconds, so the spinner tells the user to wait. */
+      .discover-status[hidden] {
+        display: none;
+      }
+
+      .discover-status {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 4px 4px 24px;
+        max-width: 920px;
         font-family: 'DM Sans', sans-serif;
         font-size: 13px;
-        font-weight: 500;
-        color: var(--text);
         letter-spacing: 0.02em;
+        color: var(--text-dim);
       }
 
-      .archive-search-sub {
-        font-family: 'DM Sans', sans-serif;
-        font-size: 11px;
-        letter-spacing: 0.18em;
-        text-transform: uppercase;
-        color: var(--text-faint);
-        margin-top: 4px;
-      }
-
-      .archive-search[data-on='true'] .archive-search-sub {
-        color: var(--gold);
-      }
-
-      .switch {
-        position: relative;
+      .discover-status .spinner {
         display: inline-block;
-        width: 42px;
-        height: 22px;
+        width: 14px;
+        height: 14px;
         flex: 0 0 auto;
-        cursor: pointer;
-      }
-      .switch input {
-        opacity: 0;
-        width: 0;
-        height: 0;
-      }
-      .switch-track {
-        position: absolute;
-        inset: 0;
-        background: rgba(255, 255, 255, 0.06);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 999px;
-        transition: background 0.25s ease, border-color 0.25s ease;
-      }
-      .switch-track::before {
-        content: '';
-        position: absolute;
-        top: 2px;
-        left: 2px;
-        width: 16px;
-        height: 16px;
-        background: var(--text-faint);
+        border: 1.5px solid var(--gold);
+        border-top-color: transparent;
         border-radius: 50%;
-        transition: transform 0.25s ease, background 0.25s ease;
-      }
-      .switch input:checked + .switch-track {
-        background: rgba(212, 160, 74, 0.18);
-        border-color: var(--gold);
-      }
-      .switch input:checked + .switch-track::before {
-        transform: translateX(20px);
-        background: var(--gold);
-      }
-      .switch input:disabled + .switch-track {
-        opacity: 0.5;
-        cursor: not-allowed;
+        animation: t-save-spin 0.8s linear infinite;
       }
 
       /* Discover shelf cards — slimmer than library cards. Each card has an
@@ -2526,15 +2482,16 @@
         </section>
 
         <section class="view" id="viewTorrents">
-          <div class="archive-search" id="archiveSearch" data-on="true">
-            <div>
-              <div class="archive-search-title">Search Internet Archive</div>
-              <div class="archive-search-sub" id="archiveSearchStatus">On</div>
-            </div>
-            <label class="switch">
-              <input type="checkbox" id="archiveSearchToggle" checked />
-              <span class="switch-track"></span>
-            </label>
+          <div class="archive-search" id="archiveSearch">
+            <input
+              type="text"
+              class="magnet-input"
+              id="discoverSearchInput"
+              placeholder="Search the Internet Archive…"
+              spellcheck="false"
+              autocomplete="off"
+            />
+            <button class="upload-btn" id="discoverSearchBtn">Search</button>
           </div>
 
           <div class="magnet-row">
@@ -2547,6 +2504,11 @@
               autocomplete="off"
             />
             <button class="upload-btn" id="addTorrentBtn">+ &nbsp;Add</button>
+          </div>
+
+          <div class="discover-status" id="discoverStatus" hidden>
+            <span class="spinner" id="discoverSpinner"></span>
+            <span id="discoverStatusText">Searching the Internet Archive…</span>
           </div>
 
           <section class="shelf" id="discoverShelf" hidden>
@@ -2946,9 +2908,11 @@
       const openUploadBtn = document.getElementById('openUpload');
       const magnetInput = document.getElementById('magnetInput');
       const addTorrentBtn = document.getElementById('addTorrentBtn');
-      const archiveSearchEl = document.getElementById('archiveSearch');
-      const archiveSearchToggle = document.getElementById('archiveSearchToggle');
-      const archiveSearchStatus = document.getElementById('archiveSearchStatus');
+      const discoverSearchInput = document.getElementById('discoverSearchInput');
+      const discoverSearchBtn = document.getElementById('discoverSearchBtn');
+      const discoverStatus = document.getElementById('discoverStatus');
+      const discoverSpinner = document.getElementById('discoverSpinner');
+      const discoverStatusText = document.getElementById('discoverStatusText');
       const discoverShelf = document.getElementById('discoverShelf');
       const discoverShelfRow = document.getElementById('discoverShelfRow');
       const discoverShelfCount = document.getElementById('discoverShelfCount');
@@ -2956,6 +2920,7 @@
       // ---- State
       let currentTab = 'library';
       let torrentPollTimer = null;
+      let discoverInitialized = false;
       let stagedVideo = null;
       let stagedSubtitles = []; // [{ file, lang }]
       let stagedPoster = null;  // { kind: 'file', file } | { kind: 'tmdb', posterPath, previewUrl }
@@ -3016,7 +2981,10 @@
 
         if (name === 'torrents') {
           loadTorrents();
-          loadArchiveSearchState().then(loadDiscover);
+          if (!discoverInitialized) {
+            discoverInitialized = true;
+            loadDiscover();
+          }
           if (!torrentPollTimer) torrentPollTimer = setInterval(loadTorrents, 1500);
         } else {
           if (torrentPollTimer) {
@@ -4924,126 +4892,141 @@
 
       // ---- Internet Archive: Discover
 
+      <!-- ---- Internet Archive / Generic Torrent Discover (Magnet-based) ---- -->
+
       const renderDiscoverCard = (item) => {
         const card = document.createElement('div');
         card.className = 'd-card';
         card.dataset.state = 'idle';
-        // Tiny inline SVG fallback for items whose poster service returns 404
-        // (some Archive items have no thumbnail). Swallows the broken-image icon.
+
         const fallback = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 2 3'%3E%3Crect width='2' height='3' fill='%23111017'/%3E%3C/svg%3E";
+
+        // Use poster if available, otherwise fallback
+        const posterSrc = item.posterUrl || fallback;
+
         card.innerHTML = `
-          <img class="d-card-poster" src="${escapeHtml(item.posterUrl)}" alt="" loading="lazy" onerror="this.src='${fallback}'; this.onerror=null;" />
+          <img class="d-card-poster" src="${escapeHtml(posterSrc)}" alt="" loading="lazy" 
+               onerror="this.src='${fallback}'; this.onerror=null;" />
+          
           <div class="d-card-info">
-            <h3 class="d-card-title">${escapeHtml(item.title)}</h3>
+            <h3 class="d-card-title">${escapeHtml(item.title || 'Unknown Title')}</h3>
             <div class="d-card-meta">
               ${item.year ? `<span>${escapeHtml(String(item.year))}</span>` : ''}
-              <span>${(item.downloads || 0).toLocaleString()} dl</span>
+              ${item.downloads ? `<span>${(item.downloads || 0).toLocaleString()} dl</span>` : ''}
+              ${item.magnets && item.magnets.length > 1 ? 
+                `<span>${item.magnets.length} magnets</span>` : ''}
             </div>
           </div>
-          <button class="d-card-download" type="button" title="Download via WebTorrent" aria-label="Download">
+          
+          <button class="d-card-download" type="button" title="Download via Magnet" aria-label="Download">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 3v12m-5-5l5 5 5-5M5 21h14"/>
             </svg>
             <span class="d-card-download-label"></span>
           </button>
         `;
+
         const btn = card.querySelector('.d-card-download');
         const label = card.querySelector('.d-card-download-label');
+
         btn.addEventListener('click', async () => {
           if (card.dataset.state !== 'idle') return;
+          
           card.dataset.state = 'adding';
           label.textContent = 'Adding…';
           btn.disabled = true;
+
           try {
             const res = await fetch(`${API}/torrent`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ torrentUrl: item.torrentUrl }),
+              body: JSON.stringify({ 
+                magnet: item.magnet || item.magnets?.[0]   // ← Key change
+              }),
             });
+
             if (!res.ok) {
               const body = await res.json().catch(() => ({}));
               throw new Error(body.error || `HTTP ${res.status}`);
             }
+
             card.dataset.state = 'added';
             label.textContent = 'Added';
-            loadTorrents();
+            loadTorrents();           // Refresh torrent list
           } catch (err) {
             card.dataset.state = 'error';
             label.textContent = 'Failed';
             btn.title = err.message;
-            // Allow retry after 2s
+
+            // Allow retry
             setTimeout(() => {
               card.dataset.state = 'idle';
               label.textContent = '';
               btn.disabled = false;
-              btn.title = 'Download via WebTorrent';
+              btn.title = 'Download via Magnet';
             }, 2000);
           }
         });
+
         return card;
       };
 
-      const loadDiscover = async () => {
-        if (!archiveSearchToggle.checked) {
-          discoverShelf.hidden = true;
-          return;
-        }
+      const setDiscoverStatus = (text, busy) => {
+        discoverStatusText.textContent = text;
+        discoverSpinner.style.display = busy ? '' : 'none';
+        discoverStatus.hidden = false;
+      };
+
+      let discoverRequestId = 0;
+
+      const loadDiscover = async (query = '') => {
+        const q = String(query || '').trim();
+        const reqId = ++discoverRequestId;
+
+        discoverShelf.hidden = true;
+        discoverSearchBtn.disabled = true;
+        setDiscoverStatus('Searching the Internet Archive…', true);
+
         try {
-          const res = await fetch(`${API}/archive/discover?rows=12`);
+          const params = new URLSearchParams({ rows: '12' });
+          if (q) params.set('q', q);
+
+          const res = await fetch(`${API}/archive/discover?${params.toString()}`);
+          if (reqId !== discoverRequestId) return;
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const { items, disabled } = await res.json();
-          if (disabled || !items || !items.length) {
-            discoverShelf.hidden = true;
+
+          const { items } = await res.json();
+          if (reqId !== discoverRequestId) return;
+
+          if (!items || !items.length) {
+            discoverShelfRow.innerHTML = '';
+            setDiscoverStatus(q ? `No results for "${q}".` : 'No results.', false);
             return;
           }
-          discoverShelf.hidden = false;
+
           discoverShelfRow.innerHTML = '';
-          items.forEach((item) => discoverShelfRow.appendChild(renderDiscoverCard(item)));
-          discoverShelfCount.textContent = `${items.length} films`;
-        } catch (err) {
-          // Soft-fail — the rest of the torrent tab should still work if
-          // archive.org is unreachable.
-          discoverShelf.hidden = true;
-          console.warn('[discover]', err.message);
-        }
-      };
-
-      const setArchiveSearchUI = (enabled) => {
-        archiveSearchToggle.checked = Boolean(enabled);
-        archiveSearchEl.dataset.on = String(Boolean(enabled));
-        archiveSearchStatus.textContent = enabled ? 'On' : 'Off';
-      };
-
-      const loadArchiveSearchState = async () => {
-        try {
-          const res = await fetch(`${API}/archive/search-enabled`);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const { enabled } = await res.json();
-          setArchiveSearchUI(enabled);
-        } catch (err) {
-          console.warn('[archive search]', err.message);
-        }
-      };
-
-      archiveSearchToggle.addEventListener('change', async () => {
-        const enabled = archiveSearchToggle.checked;
-        archiveSearchToggle.disabled = true;
-        try {
-          const res = await fetch(`${API}/archive/search-enabled`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled }),
+          items.forEach((item) => {
+            discoverShelfRow.appendChild(renderDiscoverCard(item));
           });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const data = await res.json();
-          setArchiveSearchUI(data.enabled);
-          loadDiscover();
+          discoverShelfCount.textContent = `${items.length} items`;
+          discoverShelf.hidden = false;
+          discoverStatus.hidden = true;
         } catch (err) {
-          alert('Failed to update search: ' + err.message);
-          archiveSearchToggle.checked = !enabled;
-          setArchiveSearchUI(!enabled);
+          if (reqId !== discoverRequestId) return;
+          console.warn('[discover]', err.message);
+          setDiscoverStatus('Search failed — please try again.', false);
         } finally {
-          archiveSearchToggle.disabled = false;
+          if (reqId === discoverRequestId) discoverSearchBtn.disabled = false;
+        }
+      };
+
+      const runDiscoverSearch = () => loadDiscover(discoverSearchInput.value);
+
+      discoverSearchBtn.addEventListener('click', runDiscoverSearch);
+      discoverSearchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          runDiscoverSearch();
         }
       });
 

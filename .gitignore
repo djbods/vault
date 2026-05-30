@@ -4,3 +4,4 @@ torrent-cache/
 .env
 .env.local
 .DS_Store
+archive-search-debug.png
