@@ -1403,67 +1403,78 @@ app.post('/tmdb/backfill', async (req, res) => {
 
 // ---------- Torrents ----------
 
+// Shared "add this torrent source to the WebTorrent client" path. Source can be
+// a magnet URI or an https URL to a .torrent file — WebTorrent handles both.
+// Returns the per-torrent state object the rest of the server keys off.
+const addTorrentSource = async (source) => {
+  const client = await webtorrentReady;
+  const existing = await client.get(source).catch(() => null);
+  if (existing && torrentState.has(existing.infoHash)) {
+    return torrentState.get(existing.infoHash);
+  }
+
+  const torrent = client.add(source, { path: TORRENT_DIR });
+  // webtorrent v3 doesn't always populate infoHash synchronously from add() —
+  // poll briefly so we can key the state map correctly.
+  const start = Date.now();
+  while (!torrent.infoHash && Date.now() - start < 5000) {
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  if (!torrent.infoHash) {
+    throw new Error('Timed out waiting for infoHash');
+  }
+  if (torrentState.has(torrent.infoHash)) {
+    return torrentState.get(torrent.infoHash);
+  }
+
+  const state = {
+    torrent,
+    mainFileIndex: -1,
+    subtitleIndices: [],
+    subtitleCache: new Map(),
+  };
+  torrentState.set(torrent.infoHash, state);
+
+  const onReady = () => {
+    if (state.mainFileIndex !== -1) return; // already ran
+    const { mainFileIndex, subtitleIndices } = detectTorrentFiles(torrent);
+    state.mainFileIndex = mainFileIndex;
+    state.subtitleIndices = subtitleIndices;
+    const keep = new Set([mainFileIndex, ...subtitleIndices]);
+    torrent.files.forEach((file, i) => {
+      if (keep.has(i)) file.select();
+      else file.deselect();
+    });
+    console.log(
+      `[torrent] ready: ${torrent.name} — main=${
+        mainFileIndex >= 0 ? torrent.files[mainFileIndex].name : 'none'
+      }, subs=${subtitleIndices.length}`
+    );
+  };
+  torrent.on('ready', onReady);
+  torrent.on('metadata', onReady);
+  // 'ready'/'metadata' may have already fired before listeners were attached
+  if (torrent.files && torrent.files.length) onReady();
+
+  torrent.on('error', (err) => {
+    console.error(`[torrent ${torrent.infoHash}]`, err.message || err);
+  });
+
+  return state;
+};
+
 app.post('/torrent', async (req, res) => {
-  const magnet = req.body && req.body.magnet;
-  if (!magnet || typeof magnet !== 'string' || !magnet.trim().startsWith('magnet:')) {
-    return res.status(400).json({ error: 'magnet URI required' });
+  const body = req.body || {};
+  const magnet = typeof body.magnet === 'string' ? body.magnet.trim() : '';
+  const torrentUrl = typeof body.torrentUrl === 'string' ? body.torrentUrl.trim() : '';
+  let source = '';
+  if (magnet.startsWith('magnet:')) source = magnet;
+  else if (/^https?:\/\//i.test(torrentUrl)) source = torrentUrl;
+  if (!source) {
+    return res.status(400).json({ error: 'magnet URI or .torrent URL required' });
   }
   try {
-    const client = await webtorrentReady;
-    const existing = await client.get(magnet);
-    if (existing && torrentState.has(existing.infoHash)) {
-      return res.json(serializeTorrent(torrentState.get(existing.infoHash)));
-    }
-
-    const torrent = client.add(magnet, { path: TORRENT_DIR });
-    // webtorrent v3 doesn't always populate infoHash synchronously from add() —
-    // poll briefly so we can key the state map correctly.
-    const waitForInfoHash = async () => {
-      const start = Date.now();
-      while (!torrent.infoHash && Date.now() - start < 5000) {
-        await new Promise((r) => setTimeout(r, 25));
-      }
-    };
-    await waitForInfoHash();
-    if (!torrent.infoHash) {
-      return res.status(504).json({ error: 'Timed out waiting for infoHash' });
-    }
-    if (torrentState.has(torrent.infoHash)) {
-      return res.json(serializeTorrent(torrentState.get(torrent.infoHash)));
-    }
-    const state = {
-      torrent,
-      mainFileIndex: -1,
-      subtitleIndices: [],
-      subtitleCache: new Map(),
-    };
-    torrentState.set(torrent.infoHash, state);
-
-    const onReady = () => {
-      if (state.mainFileIndex !== -1) return; // already ran
-      const { mainFileIndex, subtitleIndices } = detectTorrentFiles(torrent);
-      state.mainFileIndex = mainFileIndex;
-      state.subtitleIndices = subtitleIndices;
-      const keep = new Set([mainFileIndex, ...subtitleIndices]);
-      torrent.files.forEach((file, i) => {
-        if (keep.has(i)) file.select();
-        else file.deselect();
-      });
-      console.log(
-        `[torrent] ready: ${torrent.name} — main=${
-          mainFileIndex >= 0 ? torrent.files[mainFileIndex].name : 'none'
-        }, subs=${subtitleIndices.length}`
-      );
-    };
-    torrent.on('ready', onReady);
-    torrent.on('metadata', onReady);
-    // 'ready'/'metadata' may have already fired before listeners were attached
-    if (torrent.files && torrent.files.length) onReady();
-
-    torrent.on('error', (err) => {
-      console.error(`[torrent ${torrent.infoHash}]`, err.message || err);
-    });
-
+    const state = await addTorrentSource(source);
     res.json(serializeTorrent(state));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1709,6 +1720,193 @@ app.delete('/torrent/:infoHash', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ---------- Internet Archive (Discover) ----------
+//
+// Public-domain feature films served from archive.org. Each candidate item has
+// an auto-generated `.torrent` (the `format:("Archive BitTorrent")` filter
+// guarantees this) which we hand straight to WebTorrent. The frontend renders
+// a Discover row with a per-card download icon — every add is an explicit
+// user action; nothing is fetched on a timer.
+
+// ---------- Torrent Discover (Magnet Scraper) ----------
+// ---------- Torrent Discover (Puppeteer Scraper) ----------
+// ---------- Torrent Discover (Puppeteer Scraper) ----------
+const ARCHIVE_SEARCH_URL = 'https://www.limetorrents.fun/top100';
+
+// Puppeteer Setup
+let puppeteerLib = null;
+let browser = null;
+
+const getPuppeteer = async () => {
+  if (!puppeteerLib) {
+    puppeteerLib = await import('puppeteer');
+  }
+  return puppeteerLib;
+};
+
+const getBrowser = async () => {
+  if (!browser) {
+    const pp = await getPuppeteer();
+    browser = await pp.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+    });
+  }
+  return browser;
+};
+
+// Scraping Functions
+const scrapeSearchPage = async (url) => {
+  console.log(`[archive] Fetching: ${url}`);
+  const browser = await getBrowser();
+  const page = await browser.newPage();
+  
+  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+  await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
+
+  const pageTitle = await page.title();
+  console.log(`[archive] Page title: ${pageTitle}`);
+
+  const htmlLength = await page.evaluate(() => document.documentElement.outerHTML.length);
+  console.log(`[archive] Page HTML length: ${htmlLength}`);
+
+  // Take screenshot for us to analyze
+  await page.screenshot({ path: 'archive-search-debug.png', fullPage: true });
+  console.log('[archive] Screenshot saved as archive-search-debug.png');
+
+  const detailLinks = await page.evaluate(() => {
+    const links = new Set();
+
+    // Specific selector based on the HTML you provided
+    document.querySelectorAll('.tt-name a').forEach(a => {
+      const href = a.getAttribute('href');
+      if (href && href.includes('-torrent-')) {
+        const fullUrl = href.startsWith('http') 
+          ? href 
+          : 'https://www.limetorrents.lol' + (href.startsWith('/') ? '' : '/') + href;
+        links.add(fullUrl);
+      }
+    });
+
+    // Fallback broad selector
+    document.querySelectorAll('a[href*="-torrent-"]').forEach(a => {
+      const href = a.getAttribute('href');
+      if (href) {
+        const fullUrl = href.startsWith('http') ? href : 'https://www.limetorrents.lol' + href;
+        links.add(fullUrl);
+      }
+    });
+
+    return Array.from(links);
+  });
+
+  await page.close();
+  console.log(`[archive] Found ${detailLinks.length} detail links`);
+  return detailLinks.slice(0, 30);
+};
+
+const scrapeDetailPage = async (detailUrl) => {
+  console.log(`[archive] Scraping detail: ${detailUrl}`);
+  const browser = await getBrowser();
+  const page = await browser.newPage();
+  
+  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+  await page.goto(detailUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+
+  const data = await page.evaluate(() => {
+    const magnets = [];
+    document.querySelectorAll('a[href^="magnet:"], a[href*="magnet"]').forEach(a => {
+      magnets.push(a.href);
+    });
+
+    const title = document.querySelector('h1, .title, .torrent-title')?.innerText.trim() 
+               || document.title || 'Unknown Title';
+
+    return { title, magnets };
+  });
+
+  await page.close();
+  return { ...data, detailsUrl: detailUrl };
+};
+
+const searchTorrents = async ({ rows = 12, query = '' } = {}) => {
+  const q = String(query || '').trim();
+  const targetUrl = q
+    ? `https://www.limetorrents.fun/search/all/${encodeURIComponent(q)}/`
+    : ARCHIVE_SEARCH_URL;
+  console.log(`[archive] Fetching from ${targetUrl}`);
+
+  try {
+    const detailLinks = await scrapeSearchPage(targetUrl);
+
+    const results = [];
+    const limit = 5;
+
+    for (let i = 0; i < detailLinks.length; i += limit) {
+      const batch = detailLinks.slice(i, i + limit);
+
+      const batchResults = await Promise.allSettled(
+        batch.map((url) => scrapeDetailPage(url))
+      );
+
+      for (const res of batchResults) {
+        if (res.status === 'fulfilled' && res.value.magnets?.length > 0) {
+          const item = res.value;
+          results.push({
+            title: item.title,
+            magnet: item.magnets[0],
+            magnets: item.magnets,
+            detailsUrl: item.detailsUrl,
+            posterUrl: null,
+            year: null
+          });
+        }
+      }
+    }
+
+    console.log(`[archive] Final items with magnets: ${results.length}`);
+    return results.slice(0, rows);
+
+  } catch (err) {
+    console.error('[searchTorrents] Error:', err.message);
+    throw err;
+  }
+};
+
+// ====================== ROUTES ======================
+app.get('/archive/discover', async (req, res) => {
+  const rows = Math.max(1, Math.min(40, Number(req.query.rows) || 12));
+  const query = typeof req.query.q === 'string' ? req.query.q : '';
+
+  try {
+    const items = await searchTorrents({ rows, query });
+    res.json({ items });
+  } catch (err) {
+    console.error('[archive/discover] Failed:', err.message);
+    res.status(500).json({ error: err.message || 'Scraping failed' });
+  }
+});
+
+// END ARCHIVE
+
+
+
+// const decorateArchiveItem = (doc) => {
+//   const id = doc.identifier;
+//   return {
+//     identifier: id,
+//     title: doc.title || id,
+//     year: doc.year || null,
+//     downloads: Number(doc.downloads) || 0,
+//     publicdate: doc.publicdate || null,
+//     posterUrl: `https://archive.org/services/img/${encodeURIComponent(id)}`,
+//     detailsUrl: `https://archive.org/details/${encodeURIComponent(id)}`,
+//     // Archive auto-generates a torrent named `<identifier>_archive.torrent`
+//     // for every BitTorrent-enabled item.
+//     torrentUrl: `https://archive.org/download/${encodeURIComponent(id)}/${encodeURIComponent(id)}_archive.torrent`,
+//   };
+// };
 
 // Keep the server alive on any unhandled async error from middleware,
 // torrent streams, or third-party libs. Losing the WebTorrent client mid-download
