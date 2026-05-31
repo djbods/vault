@@ -1005,7 +1005,14 @@
         text-transform: uppercase;
         color: var(--text-faint);
         display: flex;
-        gap: 10px;
+        flex-wrap: wrap;
+        gap: 4px 10px;
+      }
+      .d-card-meta .d-seeds {
+        color: var(--gold-soft);
+      }
+      .d-card-meta .d-leech {
+        color: var(--text-faint);
       }
       .d-card-download {
         position: absolute;
@@ -4911,10 +4918,9 @@
           <div class="d-card-info">
             <h3 class="d-card-title">${escapeHtml(item.title || 'Unknown Title')}</h3>
             <div class="d-card-meta">
-              ${item.year ? `<span>${escapeHtml(String(item.year))}</span>` : ''}
-              ${item.downloads ? `<span>${(item.downloads || 0).toLocaleString()} dl</span>` : ''}
-              ${item.magnets && item.magnets.length > 1 ? 
-                `<span>${item.magnets.length} magnets</span>` : ''}
+              ${item.size ? `<span>${escapeHtml(item.size)}</span>` : ''}
+              ${item.seeds != null ? `<span class="d-seeds" title="Seeders">&#9650; ${item.seeds.toLocaleString()}</span>` : ''}
+              ${item.leeches != null ? `<span class="d-leech" title="Leechers">&#9660; ${item.leeches.toLocaleString()}</span>` : ''}
             </div>
           </div>
           

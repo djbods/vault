@@ -3,6 +3,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
+const cheerio = require('cheerio');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -1721,157 +1722,108 @@ app.delete('/torrent/:infoHash', async (req, res) => {
   }
 });
 
-// ---------- Internet Archive (Discover) ----------
+// ---------- Torrent Discover (limetorrents) ----------
 //
-// Public-domain feature films served from archive.org. Each candidate item has
-// an auto-generated `.torrent` (the `format:("Archive BitTorrent")` filter
-// guarantees this) which we hand straight to WebTorrent. The frontend renders
-// a Discover row with a per-card download icon — every add is an explicit
-// user action; nothing is fetched on a timer.
+// limetorrents serves static, server-rendered HTML, so no headless browser is
+// needed — a plain fetch returns the listing in well under a second. The listing
+// page carries title/size/seeds/leeches per row but not the magnet, so we fetch
+// each detail page (also static, ~0.15s) in parallel to pull its magnet link.
+// End to end this is ~1s versus tens of seconds for the old Puppeteer scrape.
+const ARCHIVE_BASE = 'https://www.limetorrents.fun';
+const ARCHIVE_TOP_URL = `${ARCHIVE_BASE}/top100`;
+const ARCHIVE_UA =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
+const MAGNET_RE = /magnet:\?xt=urn:btih:[^"'\s<>]+/i;
 
-// ---------- Torrent Discover (Magnet Scraper) ----------
-// ---------- Torrent Discover (Puppeteer Scraper) ----------
-// ---------- Torrent Discover (Puppeteer Scraper) ----------
-const ARCHIVE_SEARCH_URL = 'https://www.limetorrents.fun/top100';
-
-// Puppeteer Setup
-let puppeteerLib = null;
-let browser = null;
-
-const getPuppeteer = async () => {
-  if (!puppeteerLib) {
-    puppeteerLib = await import('puppeteer');
-  }
-  return puppeteerLib;
+const fetchHtml = async (url, timeoutMs = 15000) => {
+  const res = await fetch(url, {
+    headers: { 'User-Agent': ARCHIVE_UA },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+  return res.text();
 };
 
-const getBrowser = async () => {
-  if (!browser) {
-    const pp = await getPuppeteer();
-    browser = await pp.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+const parseListing = (html) => {
+  const $ = cheerio.load(html);
+  const toInt = (s) => parseInt(String(s).replace(/[^\d]/g, ''), 10) || 0;
+  const seen = new Set();
+  const items = [];
+
+  // Target the detail-page anchors directly. Result rows carry several links
+  // (sponsored/ad links come first), so we can't assume the first .tt-name link
+  // is the torrent — we match the `<slug>-torrent-<id>.html` pattern and walk up
+  // to the surrounding row for size/seeds/leeches.
+  $('a[href*="-torrent-"]').each((_, a) => {
+    const $a = $(a);
+    const href = $a.attr('href') || '';
+    if (!/-torrent-\d+\.html/.test(href)) return;
+    const title = $a.text().trim();
+    if (!title) return;
+
+    const detailsUrl = href.startsWith('http')
+      ? href
+      : `${ARCHIVE_BASE}${href.startsWith('/') ? '' : '/'}${href}`;
+    if (seen.has(detailsUrl)) return;
+    seen.add(detailsUrl);
+
+    const $tr = $a.closest('tr');
+    const normals = $tr.find('td.tdnormal').map((_, td) => $(td).text().trim()).get();
+
+    items.push({
+      title,
+      detailsUrl,
+      age: normals[0] || null,
+      size: normals[1] || null,
+      seeds: toInt($tr.find('td.tdseed').text()),
+      leeches: toInt($tr.find('td.tdleech').text()),
     });
-  }
-  return browser;
-};
-
-// Scraping Functions
-const scrapeSearchPage = async (url) => {
-  console.log(`[archive] Fetching: ${url}`);
-  const browser = await getBrowser();
-  const page = await browser.newPage();
-  
-  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
-  await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
-
-  const pageTitle = await page.title();
-  console.log(`[archive] Page title: ${pageTitle}`);
-
-  const htmlLength = await page.evaluate(() => document.documentElement.outerHTML.length);
-  console.log(`[archive] Page HTML length: ${htmlLength}`);
-
-  // Take screenshot for us to analyze
-  await page.screenshot({ path: 'archive-search-debug.png', fullPage: true });
-  console.log('[archive] Screenshot saved as archive-search-debug.png');
-
-  const detailLinks = await page.evaluate(() => {
-    const links = new Set();
-
-    // Specific selector based on the HTML you provided
-    document.querySelectorAll('.tt-name a').forEach(a => {
-      const href = a.getAttribute('href');
-      if (href && href.includes('-torrent-')) {
-        const fullUrl = href.startsWith('http') 
-          ? href 
-          : 'https://www.limetorrents.lol' + (href.startsWith('/') ? '' : '/') + href;
-        links.add(fullUrl);
-      }
-    });
-
-    // Fallback broad selector
-    document.querySelectorAll('a[href*="-torrent-"]').forEach(a => {
-      const href = a.getAttribute('href');
-      if (href) {
-        const fullUrl = href.startsWith('http') ? href : 'https://www.limetorrents.lol' + href;
-        links.add(fullUrl);
-      }
-    });
-
-    return Array.from(links);
   });
 
-  await page.close();
-  console.log(`[archive] Found ${detailLinks.length} detail links`);
-  return detailLinks.slice(0, 30);
+  return items;
 };
 
-const scrapeDetailPage = async (detailUrl) => {
-  console.log(`[archive] Scraping detail: ${detailUrl}`);
-  const browser = await getBrowser();
-  const page = await browser.newPage();
-  
-  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
-  await page.goto(detailUrl, { waitUntil: 'networkidle2', timeout: 30000 });
-
-  const data = await page.evaluate(() => {
-    const magnets = [];
-    document.querySelectorAll('a[href^="magnet:"], a[href*="magnet"]').forEach(a => {
-      magnets.push(a.href);
-    });
-
-    const title = document.querySelector('h1, .title, .torrent-title')?.innerText.trim() 
-               || document.title || 'Unknown Title';
-
-    return { title, magnets };
-  });
-
-  await page.close();
-  return { ...data, detailsUrl: detailUrl };
+const fetchMagnet = async (detailsUrl) => {
+  const html = await fetchHtml(detailsUrl, 12000);
+  const match = html.match(MAGNET_RE);
+  return match ? match[0] : null;
 };
 
 const searchTorrents = async ({ rows = 12, query = '' } = {}) => {
   const q = String(query || '').trim();
   const targetUrl = q
-    ? `https://www.limetorrents.fun/search/all/${encodeURIComponent(q)}/`
-    : ARCHIVE_SEARCH_URL;
-  console.log(`[archive] Fetching from ${targetUrl}`);
+    ? `${ARCHIVE_BASE}/search/all/${encodeURIComponent(q)}/`
+    : ARCHIVE_TOP_URL;
+  console.log(`[archive] Fetching ${targetUrl}`);
 
-  try {
-    const detailLinks = await scrapeSearchPage(targetUrl);
+  const listing = parseListing(await fetchHtml(targetUrl));
+  // Fetch a small buffer beyond `rows` so the occasional magnet-less detail
+  // page doesn't shrink the final result below what the caller asked for.
+  const candidates = listing.slice(0, rows + 6);
 
-    const results = [];
-    const limit = 5;
+  const settled = await Promise.allSettled(
+    candidates.map((c) => fetchMagnet(c.detailsUrl))
+  );
 
-    for (let i = 0; i < detailLinks.length; i += limit) {
-      const batch = detailLinks.slice(i, i + limit);
+  const results = [];
+  settled.forEach((res, i) => {
+    if (res.status !== 'fulfilled' || !res.value) return;
+    const c = candidates[i];
+    results.push({
+      title: c.title,
+      magnet: res.value,
+      magnets: [res.value],
+      detailsUrl: c.detailsUrl,
+      posterUrl: null,
+      year: null,
+      size: c.size,
+      seeds: c.seeds,
+      leeches: c.leeches,
+    });
+  });
 
-      const batchResults = await Promise.allSettled(
-        batch.map((url) => scrapeDetailPage(url))
-      );
-
-      for (const res of batchResults) {
-        if (res.status === 'fulfilled' && res.value.magnets?.length > 0) {
-          const item = res.value;
-          results.push({
-            title: item.title,
-            magnet: item.magnets[0],
-            magnets: item.magnets,
-            detailsUrl: item.detailsUrl,
-            posterUrl: null,
-            year: null
-          });
-        }
-      }
-    }
-
-    console.log(`[archive] Final items with magnets: ${results.length}`);
-    return results.slice(0, rows);
-
-  } catch (err) {
-    console.error('[searchTorrents] Error:', err.message);
-    throw err;
-  }
+  console.log(`[archive] ${results.length}/${candidates.length} items with magnets`);
+  return results.slice(0, rows);
 };
 
 // ====================== ROUTES ======================
@@ -1884,29 +1836,11 @@ app.get('/archive/discover', async (req, res) => {
     res.json({ items });
   } catch (err) {
     console.error('[archive/discover] Failed:', err.message);
-    res.status(500).json({ error: err.message || 'Scraping failed' });
+    res.status(500).json({ error: err.message || 'Search failed' });
   }
 });
 
 // END ARCHIVE
-
-
-
-// const decorateArchiveItem = (doc) => {
-//   const id = doc.identifier;
-//   return {
-//     identifier: id,
-//     title: doc.title || id,
-//     year: doc.year || null,
-//     downloads: Number(doc.downloads) || 0,
-//     publicdate: doc.publicdate || null,
-//     posterUrl: `https://archive.org/services/img/${encodeURIComponent(id)}`,
-//     detailsUrl: `https://archive.org/details/${encodeURIComponent(id)}`,
-//     // Archive auto-generates a torrent named `<identifier>_archive.torrent`
-//     // for every BitTorrent-enabled item.
-//     torrentUrl: `https://archive.org/download/${encodeURIComponent(id)}/${encodeURIComponent(id)}_archive.torrent`,
-//   };
-// };
 
 // Keep the server alive on any unhandled async error from middleware,
 // torrent streams, or third-party libs. Losing the WebTorrent client mid-download

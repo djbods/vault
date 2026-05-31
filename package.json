@@ -9,11 +9,11 @@
     "dev": "/Users/jbodsworth/.nvm/versions/node/v20.16.0/bin/node --watch server.js"
   },
   "dependencies": {
+    "cheerio": "^1.2.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
     "multer": "^2.1.1",
-    "puppeteer": "^25.1.0",
     "webtorrent": "^3.0.0"
   }
 }
