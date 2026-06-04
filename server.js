@@ -28,18 +28,12 @@ const PORT = process.env.PORT || 3001;
 // write would otherwise trigger an iCloud upload).
 const VIDEOS_DIR = expandPath(process.env.LIBRARY_DIR) || path.join(__dirname, 'videos');
 const TORRENT_DIR = expandPath(process.env.TORRENT_DIR) || path.join(__dirname, 'torrent-cache');
-// Where lazily-built HLS artifacts (fMP4 remux + playlists) for AirPlay
-// subtitle support live. Like TORRENT_DIR, KEEP THIS LOCAL — never iCloud.
-const HLS_CACHE_DIR = expandPath(process.env.HLS_CACHE_DIR) || path.join(__dirname, 'hls-cache');
 
 if (!fs.existsSync(VIDEOS_DIR)) {
   fs.mkdirSync(VIDEOS_DIR, { recursive: true });
 }
 if (!fs.existsSync(TORRENT_DIR)) {
   fs.mkdirSync(TORRENT_DIR, { recursive: true });
-}
-if (!fs.existsSync(HLS_CACHE_DIR)) {
-  fs.mkdirSync(HLS_CACHE_DIR, { recursive: true });
 }
 
 const MIME_TYPES = {
@@ -369,7 +363,7 @@ const probeFile = (filepath) =>
     if (cached) return resolve(cached);
     const ff = spawn('ffprobe', [
       '-v', 'error',
-      '-show_entries', 'stream=index,codec_type,codec_name,channels,channel_layout,width,height:format=duration',
+      '-show_entries', 'stream=index,codec_type,codec_name,channels,channel_layout:format=duration',
       '-of', 'json',
       filepath,
     ]);
@@ -390,8 +384,6 @@ const probeFile = (filepath) =>
           audioChannels: audio ? (audio.channels || 0) : 0,
           audioChannelLayout: audio ? (audio.channel_layout || '').toLowerCase() : '',
           videoCodec: video ? (video.codec_name || '').toLowerCase() : '',
-          videoWidth: video ? (video.width || 0) : 0,
-          videoHeight: video ? (video.height || 0) : 0,
           duration: parseFloat((parsed.format || {}).duration) || 0,
         };
         probeCache.set(filepath, result);
@@ -743,13 +735,18 @@ app.patch('/videos/:filename/metadata', (req, res) => {
   res.json({ name: filename, metadata: updated });
 });
 
-// Byte-range file streaming shared by /stream and the HLS fMP4 segment route.
-// Files are pre-conditioned at import time so they're browser-decodable — no
-// live transcoding needed.
-const sendWithRange = (req, res, filepath, contentType) => {
+app.get('/stream/:filename', (req, res) => {
+  const filepath = resolveSafe(req.params.filename);
+  if (!filepath || !fs.existsSync(filepath)) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+
   const stat = fs.statSync(filepath);
   const fileSize = stat.size;
+  // Native byte-range only — files are pre-conditioned at import time so
+  // they're guaranteed browser-decodable, no live transcoding needed.
   const range = req.headers.range;
+  const contentType = mimeFor(filepath);
 
   if (range) {
     const match = /bytes=(\d*)-(\d*)/.exec(range);
@@ -778,14 +775,6 @@ const sendWithRange = (req, res, filepath, contentType) => {
     });
     fs.createReadStream(filepath).pipe(res);
   }
-};
-
-app.get('/stream/:filename', (req, res) => {
-  const filepath = resolveSafe(req.params.filename);
-  if (!filepath || !fs.existsSync(filepath)) {
-    return res.status(404).json({ error: 'Not found' });
-  }
-  sendWithRange(req, res, filepath, mimeFor(filepath));
 });
 
 // Rename a library video plus all its sidecars (poster, subtitle files).
@@ -972,209 +961,6 @@ app.get('/stream-subtitle/:filename', (req, res) => {
     return res.send(srtToVtt(fs.readFileSync(filepath, 'utf-8')));
   }
   fs.createReadStream(filepath).pipe(res);
-});
-
-// ---------- HLS (for AirPlay subtitles) ----------
-//
-// Native AirPlay hands the receiver the media URL and the TV plays it itself,
-// so sidecar <track> WebVTT cues — rendered locally by Safari — never reach the
-// TV. The only way to get toggleable captions onto the TV is HLS with a WebVTT
-// subtitle GROUP declared in the manifest, so the captions travel as part of
-// the stream the receiver plays. We lazily build, per library file, into a
-// local cache (HLS_CACHE_DIR, never iCloud):
-//   <cache>/<base>/video.m3u8 + video.m4s  — lossless fMP4 remux (-c copy)
-//   <cache>/<base>/master.m3u8             — variant + #EXT-X-MEDIA subtitle group
-//   <cache>/<base>/subs_<token>.m3u8       — one VOD WebVTT rendition per sidecar
-// The .m4s is reused across plays; the playlists are cheap and rewritten on
-// every master request so subtitles added/removed after import are reflected.
-// Only Safari (which plays HLS natively + is the AirPlay client) uses these;
-// other browsers keep the progressive /stream path.
-
-const hlsDirFor = (base) => path.join(HLS_CACHE_DIR, base);
-
-// WebVTT-convertible subtitle sidecars for a video base name. `token` is the
-// unique middle segment of the filename ("en", "en2", "eng") and doubles as the
-// rendition id; `lang` is the ISO code for the HLS LANGUAGE attribute.
-const subtitleSidecars = (base) => {
-  let entries = [];
-  try {
-    entries = fs.readdirSync(VIDEOS_DIR);
-  } catch {
-    return [];
-  }
-  return entries
-    .filter(
-      (n) =>
-        n.startsWith(base + '.') &&
-        SUBTITLE_EXTS.has(path.extname(n).toLowerCase())
-    )
-    .map((n) => {
-      const middle = n.slice(base.length + 1, n.length - path.extname(n).length);
-      const token = (middle.split('.').filter(Boolean)[0] || 'en').toLowerCase();
-      return { name: n, token, lang: sanitizeLang(token), ext: path.extname(n).toLowerCase() };
-    })
-    // Only text subs we can serve as WebVTT can be an HLS subtitle rendition.
-    .filter((s) => s.ext === '.vtt' || s.ext === '.srt');
-};
-
-// HLS WebVTT renditions need a timestamp map aligning the cue clock to the
-// media timeline. Sources start at PTS 0, so MPEGTS:0 ↔ 00:00:00.000.
-const injectTimestampMap = (vtt) => {
-  if (vtt.includes('X-TIMESTAMP-MAP')) return vtt;
-  const nl = vtt.indexOf('\n');
-  if (vtt.slice(0, 6) !== 'WEBVTT' || nl === -1) {
-    return 'WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:0,LOCAL:00:00:00.000\n\n' + vtt;
-  }
-  return vtt.slice(0, nl) + '\nX-TIMESTAMP-MAP=MPEGTS:0,LOCAL:00:00:00.000' + vtt.slice(nl);
-};
-
-// In-flight remux guard so concurrent requests for the same file don't spawn
-// ffmpeg twice (mirrors the care taken around torrent streams).
-const hlsBuilds = new Map();
-
-const buildHlsVideo = (srcPath, dir, isHevc) =>
-  new Promise((resolve, reject) => {
-    fs.mkdirSync(dir, { recursive: true });
-    // Single-file fMP4: one video.m4s + a playlist using EXT-X-MAP/BYTERANGE,
-    // not hundreds of segments. -c copy = no re-encode. The hvc1 tag is forced
-    // only for HEVC (mislabels H.264 otherwise), matching the import pipeline.
-    const ff = spawn('ffmpeg', [
-      '-hide_banner', '-loglevel', 'error',
-      '-y', '-i', srcPath,
-      '-map', '0:v:0', '-map', '0:a:0?',
-      '-c', 'copy',
-      ...(isHevc ? ['-tag:v', 'hvc1'] : []),
-      '-f', 'hls',
-      '-hls_playlist_type', 'vod',
-      '-hls_segment_type', 'fmp4',
-      '-hls_flags', 'single_file',
-      '-hls_time', '6',
-      path.join(dir, 'video.m3u8'),
-    ]);
-    let err = '';
-    ff.stderr.on('data', (d) => (err += d.toString()));
-    ff.on('error', reject);
-    ff.on('close', (code) => {
-      if (code !== 0) return reject(new Error(`ffmpeg hls exit ${code}: ${err.trim().slice(0, 300)}`));
-      resolve();
-    });
-  });
-
-// Ensure the HLS bundle for `filename` exists and its playlists reflect the
-// current sidecar set. Returns { dir, base }. Throws 'Not found' if the source
-// is missing or escapes the library.
-const ensureHls = async (filename) => {
-  const srcPath = resolveSafe(filename);
-  if (!srcPath || !fs.existsSync(srcPath)) throw new Error('Not found');
-  const base = baseNameNoExt(path.basename(srcPath));
-  const dir = hlsDirFor(base);
-  const stat = fs.statSync(srcPath);
-  const stamp = `${Math.round(stat.mtimeMs)}:${stat.size}`;
-  const stampPath = path.join(dir, '.source');
-  const m4s = path.join(dir, 'video.m4s');
-
-  // One probe drives the hvc1 decision and the master playlist's metadata.
-  const probe = await probeFile(srcPath).catch(() => ({}));
-  const isHevc = probe.videoCodec === 'hevc' || probe.videoCodec === 'h265';
-
-  let needBuild = !fs.existsSync(m4s);
-  if (!needBuild) {
-    try {
-      needBuild = fs.readFileSync(stampPath, 'utf-8') !== stamp;
-    } catch {
-      needBuild = true;
-    }
-  }
-
-  if (needBuild) {
-    if (!hlsBuilds.has(base)) {
-      hlsBuilds.set(
-        base,
-        buildHlsVideo(srcPath, dir, isHevc)
-          .then(() => fs.writeFileSync(stampPath, stamp))
-          .finally(() => hlsBuilds.delete(base))
-      );
-    }
-    await hlsBuilds.get(base);
-  }
-
-  // (Re)write master + subtitle playlists from the live sidecar set.
-  const duration = probe.duration || 0;
-  const w = probe.videoWidth || 0;
-  const h = probe.videoHeight || 0;
-  const bandwidth = duration > 0 ? Math.ceil((stat.size * 8) / duration) : 5000000;
-  const subs = subtitleSidecars(base);
-
-  const durStr = duration > 0 ? duration.toFixed(3) : '0.000';
-  const targetDur = Math.ceil(duration) || 1;
-  for (const s of subs) {
-    fs.writeFileSync(
-      path.join(dir, `subs_${s.token}.m3u8`),
-      '#EXTM3U\n' +
-        '#EXT-X-VERSION:7\n' +
-        `#EXT-X-TARGETDURATION:${targetDur}\n` +
-        '#EXT-X-MEDIA-SEQUENCE:0\n' +
-        '#EXT-X-PLAYLIST-TYPE:VOD\n' +
-        `#EXTINF:${durStr},\n` +
-        `${s.token}.vtt\n` +
-        '#EXT-X-ENDLIST\n'
-    );
-  }
-
-  let master = '#EXTM3U\n#EXT-X-VERSION:7\n';
-  for (const s of subs) {
-    // DEFAULT/AUTOSELECT NO so nothing auto-enables — vault subtitles are off
-    // until the user picks one in the player (which the receiver then honors).
-    master +=
-      `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="${s.token.toUpperCase()}",` +
-      `LANGUAGE="${s.lang}",DEFAULT=NO,AUTOSELECT=NO,URI="subs_${s.token}.m3u8"\n`;
-  }
-  const resolution = w && h ? `,RESOLUTION=${w}x${h}` : '';
-  const subAttr = subs.length ? ',SUBTITLES="subs"' : '';
-  master += `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth}${resolution}${subAttr}\nvideo.m3u8\n`;
-  fs.writeFileSync(path.join(dir, 'master.m3u8'), master);
-
-  return { dir, base };
-};
-
-const PLAYLIST_MIME = 'application/vnd.apple.mpegurl';
-
-// High-frequency byte-range requests for the fMP4 — no playlist rewrite here.
-app.get('/hls/:filename/video.m4s', (req, res) => {
-  const src = resolveSafe(req.params.filename);
-  if (!src) return res.status(400).end();
-  const file = path.join(hlsDirFor(baseNameNoExt(path.basename(src))), 'video.m4s');
-  if (!fs.existsSync(file)) return res.status(404).end();
-  sendWithRange(req, res, file, 'video/iso.segment');
-});
-
-// Playlists (master.m3u8 / video.m3u8 / subs_<token>.m3u8) and WebVTT renditions.
-app.get('/hls/:filename/:artifact', async (req, res) => {
-  const artifact = req.params.artifact;
-  const isPlaylist = /^[a-z0-9_]+\.m3u8$/i.test(artifact);
-  const isVtt = /^[a-z0-9]+\.vtt$/i.test(artifact);
-  if (!isPlaylist && !isVtt) return res.status(404).end();
-  try {
-    const { dir, base } = await ensureHls(req.params.filename);
-    if (isPlaylist) {
-      const pl = path.join(dir, artifact);
-      if (!fs.existsSync(pl)) return res.status(404).end();
-      res.set('Content-Type', PLAYLIST_MIME);
-      res.set('Cache-Control', 'no-cache');
-      return fs.createReadStream(pl).pipe(res);
-    }
-    // WebVTT rendition with X-TIMESTAMP-MAP injected.
-    const token = artifact.slice(0, -4).toLowerCase();
-    const match = subtitleSidecars(base).find((s) => s.token === token);
-    if (!match) return res.status(404).end();
-    let vtt = fs.readFileSync(path.join(VIDEOS_DIR, match.name), 'utf-8');
-    if (match.ext === '.srt') vtt = srtToVtt(vtt);
-    res.set('Content-Type', 'text/vtt; charset=utf-8');
-    res.set('Cache-Control', 'no-cache');
-    return res.send(injectTimestampMap(vtt));
-  } catch (err) {
-    return res.status(err.message === 'Not found' ? 404 : 500).json({ error: err.message });
-  }
 });
 
 // ---------- Posters ----------
