@@ -266,6 +266,10 @@ const serializeTorrent = (state) => {
     downloaded: torrent.downloaded || 0,
     length: torrent.length || 0,
     etaSeconds: torrentEtaSeconds(torrent),
+    // Save-to-library transcode state — drives the in-card progress bar.
+    saving: Boolean(state.savingToLibrary),
+    saveProgress: typeof state.saveProgress === 'number' ? state.saveProgress : 0,
+    savePhase: state.savePhase || null,
     mainVideo: mainFile ? { name: mainFile.name, length: mainFile.length } : null,
     subtitles: subtitleIndices.map((i) => {
       const f = torrent.files[i];
@@ -412,7 +416,7 @@ const probeFile = (filepath) =>
 // unknown layout. HEVC streams get the hvc1 tag forced so Chrome/Safari
 // accept the parameter sets in hvcC. Writes <targetDir>/<targetBase>.mp4
 // with +faststart for byte-range play.
-const prepareForLibrary = async (srcPath, targetDir, targetBase) => {
+const prepareForLibrary = async (srcPath, targetDir, targetBase, onProgress = null) => {
   const probe = await probeFile(srcPath).catch(() => ({
     audioCodec: '', videoCodec: '', audioChannels: 0, audioChannelLayout: '',
   }));
@@ -425,6 +429,7 @@ const prepareForLibrary = async (srcPath, targetDir, targetBase) => {
     (audioChannels > 1 && (!audioChannelLayout || audioChannelLayout === 'unknown'));
   const needsAudioTranscode = needsAudioRecodec || needsAudioDownmix;
   const isHevc = videoCodec === 'hevc' || videoCodec === 'h265';
+  const duration = probe.duration || 0;
 
   const outPath = path.join(targetDir, `${targetBase}.mp4`);
 
@@ -432,6 +437,11 @@ const prepareForLibrary = async (srcPath, targetDir, targetBase) => {
     const ffArgs = [
       '-hide_banner',
       '-loglevel', 'error',
+      '-nostats',
+      // Machine-readable progress on stdout. Lets save-to-library drive a
+      // determinate bar; harmless for callers that pass no onProgress (the
+      // pipe is still drained so it can't fill and stall the child).
+      '-progress', 'pipe:1',
       '-fflags', '+genpts',
       '-i', srcPath,
       '-map', '0:v:0',
@@ -453,6 +463,26 @@ const prepareForLibrary = async (srcPath, targetDir, targetBase) => {
 
     const ff = spawn('ffmpeg', ffArgs);
     let stderr = '';
+    let progressBuf = '';
+    // ffmpeg emits `key=value` lines on stdout (-progress pipe:1). We map
+    // out_time_us (microseconds processed) against the known duration to a
+    // 0..1 fraction. Buffered by line so split key/value pairs don't misparse.
+    ff.stdout.on('data', (d) => {
+      progressBuf += d.toString();
+      const nl = progressBuf.lastIndexOf('\n');
+      if (nl === -1) return;
+      const chunk = progressBuf.slice(0, nl);
+      progressBuf = progressBuf.slice(nl + 1);
+      if (!onProgress || duration <= 0) return;
+      for (const line of chunk.split('\n')) {
+        const m = line.match(/^out_time_us=(\d+)/);
+        if (m) {
+          onProgress(Math.max(0, Math.min(0.999, Number(m[1]) / 1e6 / duration)));
+        } else if (line === 'progress=end') {
+          onProgress(1);
+        }
+      }
+    });
     ff.stderr.on('data', (d) => (stderr += d.toString()));
     ff.on('error', reject);
     ff.on('close', (code) => {
@@ -1824,6 +1854,8 @@ app.post('/torrent/:infoHash/save-to-library', async (req, res) => {
       return res.status(409).json({ error: 'Already saving' });
     }
     state.savingToLibrary = true;
+    state.saveProgress = 0;
+    state.savePhase = 'transcode';
 
     const videoFile = state.torrent.files[state.mainFileIndex];
     const sourcePath = path.join(state.torrent.path, videoFile.path);
@@ -1843,7 +1875,15 @@ app.post('/torrent/:infoHash/save-to-library', async (req, res) => {
     // Transcode (or remux) the source into VIDEOS_DIR. Audio is converted
     // to AAC if the source codec isn't browser-friendly; video is always
     // stream-copied. HEVC gets the hvc1 tag.
-    const videoDest = await prepareForLibrary(sourcePath, VIDEOS_DIR, cleanedBase);
+    const videoDest = await prepareForLibrary(
+      sourcePath, VIDEOS_DIR, cleanedBase,
+      (frac) => { state.saveProgress = frac; },
+    );
+
+    // ffmpeg is done. The remaining sidecar copy + embedded-subtitle pass is
+    // quick but not measurable, so flip to an indeterminate "finishing" phase.
+    state.saveProgress = 1;
+    state.savePhase = 'subtitles';
 
     // Copy sibling .srt/.vtt files first, converting SRT → VTT and tagging
     // with the language detected from the filename.
@@ -1885,7 +1925,11 @@ app.post('/torrent/:infoHash/save-to-library', async (req, res) => {
     res.json({ ok: true, name: path.basename(videoDest), subtitles: writtenSubs });
   } catch (err) {
     const state = torrentState.get(req.params.infoHash);
-    if (state) state.savingToLibrary = false;
+    if (state) {
+      state.savingToLibrary = false;
+      state.saveProgress = 0;
+      state.savePhase = null;
+    }
     res.status(500).json({ error: err.message });
   }
 });
