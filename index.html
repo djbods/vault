@@ -3826,6 +3826,7 @@
       let resumeApplied = false; // set after the seek-to-resume happens
       let watchedFiredAt = 0;    // de-dup the 95% auto-watched call
       let resumeSaveTimer = null;
+      let hlsMode = false;       // true when the player uses a native HLS source
 
       // ---- Subtitle menu
       const closeSubMenu = () => {
@@ -3893,6 +3894,40 @@
         disableAll();
         setTimeout(disableAll, 50);
       };
+
+      // Native HLS (Safari) plays the /hls master playlist and exposes its
+      // WebVTT subtitle group as in-band text tracks — which is what lets the
+      // captions ride along to an Apple TV over AirPlay. canPlayType is the
+      // reliable capability probe (Safari returns "maybe", others return "").
+      const supportsNativeHls =
+        playerEl.canPlayType('application/vnd.apple.mpegurl') !== '';
+
+      const subtitleTextTracks = () => {
+        const out = [];
+        for (const tt of playerEl.textTracks) {
+          if (tt.kind === 'subtitles' || tt.kind === 'captions') out.push(tt);
+        }
+        return out;
+      };
+
+      // On the HLS path the renditions arrive asynchronously after the manifest
+      // loads, so (re)build the menu from textTracks whenever the set changes.
+      // selectSubtitle() already toggles playerEl.textTracks[i].mode and the
+      // in-band tracks ARE that list, so the menu indices line up.
+      const refreshHlsSubMenu = () => {
+        const tts = subtitleTextTracks();
+        if (!tts.length) {
+          playerCC.hidden = true;
+          subMenu.innerHTML = '';
+          return;
+        }
+        renderSubMenu(tts.map((tt) => ({ lang: tt.language, label: tt.label })));
+        playerCC.hidden = false;
+      };
+
+      playerEl.textTracks.addEventListener('addtrack', () => {
+        if (hlsMode) refreshHlsSubMenu();
+      });
 
       playerCC.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -4377,6 +4412,7 @@
         playerCurrent.textContent = '0:00';
         playerDuration.textContent = '0:00';
         currentLocalVideo = null;
+        hlsMode = false;
         resumeApplied = false;
         watchedFiredAt = 0;
         resumeSaveTimer = null;
@@ -4388,32 +4424,55 @@
         resumeApplied = false;
         watchedFiredAt = 0;
         resumeSaveTimer = null;
-        playerEl.src = `${API}/stream/${encodeURIComponent(filename)}`;
+        // Safari plays HLS natively and is the AirPlay client, so it gets the
+        // HLS master (whose WebVTT subtitle group rides along to the TV over
+        // AirPlay). Every other browser keeps the simple progressive stream.
+        hlsMode = supportsNativeHls;
+        playerEl.src = hlsMode
+          ? `${API}/hls/${encodeURIComponent(filename)}/master.m3u8`
+          : `${API}/stream/${encodeURIComponent(filename)}`;
         playerTitleEl.textContent = cleanName(filename);
         openModal(playerModal);
         setPlayState();
         updateVolumeUI();
-        // Subtitles + resume position fetched in parallel.
+
+        if (hlsMode) {
+          // In-band renditions arrive asynchronously from the manifest — don't
+          // append <track> elements (they'd duplicate). Start captions off, then
+          // build the menu from textTracks as they appear (here + on addtrack).
+          playerEl.querySelectorAll('track').forEach((t) => t.remove());
+          activeTrackIndex = -1;
+          playerCC.classList.remove('active');
+          playerCC.hidden = true;
+          closeSubMenu();
+          subMenu.innerHTML = '';
+          const initHlsTracks = () => {
+            for (const tt of subtitleTextTracks()) {
+              if (tt.mode === 'showing') tt.mode = 'disabled';
+            }
+            refreshHlsSubMenu();
+          };
+          if (playerEl.readyState >= 1) initHlsTracks();
+          playerEl.addEventListener('loadedmetadata', initHlsTracks, { once: true });
+        }
+
+        // Resume position (always) + sidecar subtitles (non-HLS only).
         let resumeSec = null;
         try {
-          const [subRes, listRes] = await Promise.all([
-            fetch(`${API}/subtitles/${encodeURIComponent(filename)}`),
-            fetch(`${API}/videos`),
-          ]);
-          const subs = subRes.ok ? await subRes.json() : [];
-          const tracks = subs.map((s) => ({
-            url: `${API}${s.url}`,
-            label: s.label,
-            lang: s.lang,
-          }));
-          applySubtitles(tracks);
+          const reqs = [fetch(`${API}/videos`)];
+          if (!hlsMode) reqs.push(fetch(`${API}/subtitles/${encodeURIComponent(filename)}`));
+          const [listRes, subRes] = await Promise.all(reqs);
+          if (!hlsMode) {
+            const subs = subRes && subRes.ok ? await subRes.json() : [];
+            applySubtitles(subs.map((s) => ({ url: `${API}${s.url}`, label: s.label, lang: s.lang })));
+          }
           if (listRes.ok) {
             const list = await listRes.json();
             const v = list.find((x) => x.name === filename);
             if (v && typeof v.resumePosition === 'number') resumeSec = v.resumePosition;
           }
         } catch {
-          applySubtitles([]);
+          if (!hlsMode) applySubtitles([]);
         }
         // Apply resume position once metadata is in. `loadedmetadata` may
         // have fired before we got here, so try once now and once on the
@@ -4427,6 +4486,7 @@
 
       const playTorrent = (t) => {
         currentLocalVideo = null;
+        hlsMode = false; // torrents stream progressively with sidecar <track>s
         resumeApplied = true; // disable resume for torrents
         playerEl.src = `${API}/torrent/${t.infoHash}/stream`;
         playerTitleEl.textContent = cleanName((t.mainVideo && t.mainVideo.name) || t.name);
