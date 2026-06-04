@@ -422,6 +422,17 @@
         gap: 32px;
       }
 
+      /* Torrent grid: 3-up like the base .grid, but with a 0 minimum track
+         size. Plain `1fr` is `minmax(auto, 1fr)`, whose content-driven
+         minimum lets the columns widen/narrow as the percentage, speed and
+         ETA text change each poll — the visible jitter. minmax(0, 1fr) locks
+         the tracks to the container so card width never reacts to content.
+         align-items:start keeps a tall card from stretching its row-mates. */
+      #torrentGrid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        align-items: start;
+      }
+
       /* Library cards are portrait at rest, expand horizontally to landscape
          on hover while keeping their full height. The slot keeps a fixed 2:3
          footprint in the grid so the card can bloom outward via absolute
@@ -868,28 +879,59 @@
         pointer-events: none;
       }
 
-      /* Working state — the button is disabled but stays readable so the
-         spinner + elapsed counter remain visible during the 2-3 min transcode. */
-      .t-save.is-working:disabled {
-        opacity: 1;
-        cursor: wait;
-        background: rgba(212, 160, 74, 0.18);
-      }
-
-      .t-save .spinner {
-        display: inline-block;
-        width: 10px;
-        height: 10px;
-        margin-right: 10px;
-        vertical-align: -1px;
-        border: 1.5px solid currentColor;
-        border-top-color: transparent;
-        border-radius: 50%;
-        animation: t-save-spin 0.8s linear infinite;
-      }
-
       @keyframes t-save-spin {
         to { transform: rotate(360deg); }
+      }
+
+      /* Save-to-library status — replaces the action row while the torrent is
+         being transcoded into the library. Determinate while ffmpeg runs
+         (driven by the /torrents poll), indeterminate during the brief
+         sidecar/cleanup phase that can't be measured. */
+      .t-save-progress {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .t-save-progress[hidden] {
+        display: none;
+      }
+
+      .t-save-label {
+        display: flex;
+        justify-content: space-between;
+        font-family: 'DM Sans', sans-serif;
+        font-size: 10px;
+        letter-spacing: 0.25em;
+        text-transform: uppercase;
+        color: var(--gold);
+      }
+
+      .t-save-bar {
+        position: relative;
+        height: 2px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 1px;
+        overflow: hidden;
+      }
+
+      .t-save-fill {
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, var(--gold-deep), var(--gold), var(--gold-soft));
+        box-shadow: 0 0 10px rgba(212, 160, 74, 0.45);
+        transition: width 0.3s ease;
+      }
+
+      .t-save-bar.is-indeterminate .t-save-fill {
+        width: 35%;
+        transition: none;
+        animation: t-indeterminate 1.1s ease-in-out infinite;
+      }
+
+      @keyframes t-indeterminate {
+        0% { transform: translateX(-110%); }
+        100% { transform: translateX(330%); }
       }
 
       .magnet-row {
@@ -2406,6 +2448,9 @@
         #grid {
           grid-template-columns: repeat(2, 1fr);
           gap: 16px;
+        }
+        #torrentGrid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
         .card-info {
           padding: 12px 14px 12px;
@@ -4763,53 +4808,55 @@
       };
 
       // ---- Torrents
-      const renderTorrentCard = (t) => {
+      // Cards are created once and updated in place, keyed by infoHash. The
+      // list polls every 1.5s; tearing the DOM down each poll would reset the
+      // progress-bar transition, restart the badge pulse, drop hover state and
+      // (worst of all) wipe an in-progress save. Diffing avoids all of that and
+      // — with #torrentGrid's minmax(0,1fr) tracks — keeps card width steady.
+      const torrentCards = new Map(); // infoHash -> { card, els, t, saving }
+
+      const TORRENT_STATUS_TEXT = {
+        connecting: 'Connecting',
+        downloading: 'Downloading',
+        stalled: 'Stalled',
+        seeding: 'Seeding',
+        paused: 'Paused',
+      };
+
+      const createTorrentCard = (infoHash) => {
         const card = document.createElement('div');
         card.className = 't-card';
-        const pct = Math.round((t.progress || 0) * 100);
-        const canWatch = (t.progress || 0) > 0.02 && t.mainVideo;
-        const canSave = (t.progress || 0) >= 1 && t.mainVideo;
-        const isComplete = (t.progress || 0) >= 1;
-        const isPaused = Boolean(t.paused);
-        // Pause/Resume only makes sense while still downloading; once a
-        // torrent is at 100% it's just seeding and the action becomes a no-op.
-        const showPauseToggle = !isComplete;
-        const statusText = {
-          connecting: 'Connecting',
-          downloading: 'Downloading',
-          stalled: 'Stalled',
-          seeding: 'Seeding',
-          paused: 'Paused',
-        }[t.status] || t.status;
-
-        // Show the ETA stat only while we're actually downloading — paused
-        // and stalled torrents would just render "—".
-        const showEta = !isComplete && !isPaused && t.etaSeconds != null;
-
         card.innerHTML = `
           <div class="t-head">
-            <h3 class="t-title">${escapeHtml(t.name || t.infoHash)}</h3>
-            <span class="t-badge" data-status="${t.status}">${statusText}</span>
+            <h3 class="t-title"></h3>
+            <span class="t-badge"></span>
           </div>
           <div class="t-progress-wrap">
             <div class="t-progress-label">
               <span>Progress</span>
-              <span>${pct}%</span>
+              <span class="t-pct">0%</span>
             </div>
             <div class="t-progress-bar">
-              <div class="t-progress-fill" style="width:${pct}%"></div>
+              <div class="t-progress-fill" style="width:0%"></div>
             </div>
           </div>
           <div class="t-stats">
-            <div><span class="t-stat-label">DL</span>${formatSpeed(t.downloadSpeed)}</div>
-            <div><span class="t-stat-label">Peers</span>${t.numPeers || 0}</div>
-            ${t.mainVideo ? `<div><span class="t-stat-label">Size</span>${formatSize(t.mainVideo.length)}</div>` : ''}
-            ${showEta ? `<div><span class="t-stat-label">ETA</span>${formatEta(t.etaSeconds)}</div>` : ''}
+            <div><span class="t-stat-label">DL</span><span class="t-dl">—</span></div>
+            <div><span class="t-stat-label">Peers</span><span class="t-peers">0</span></div>
+            <div class="t-size-wrap" hidden><span class="t-stat-label">Size</span><span class="t-size"></span></div>
+            <div class="t-eta-wrap" hidden><span class="t-stat-label">ETA</span><span class="t-eta"></span></div>
           </div>
           <div class="t-actions">
-            <button class="t-watch" ${canWatch ? '' : 'disabled'}>${canWatch ? 'Watch' : 'Buffering…'}</button>
-            ${showPauseToggle ? `<button class="t-pause">${isPaused ? 'Resume' : 'Pause'}</button>` : ''}
-            ${canSave ? `<button class="t-save">Save to Library</button>` : ''}
+            <button class="t-watch" disabled>Buffering…</button>
+            <button class="t-pause" hidden>Pause</button>
+            <button class="t-save" hidden>Save to Library</button>
+          </div>
+          <div class="t-save-progress" hidden>
+            <div class="t-save-label">
+              <span class="t-save-phase">Transcoding</span>
+              <span class="t-save-pct"></span>
+            </div>
+            <div class="t-save-bar"><div class="t-save-fill"></div></div>
           </div>
           <button class="card-delete" title="Remove torrent">
             <svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -4818,20 +4865,112 @@
             </svg>
           </button>
         `;
+        const els = {
+          title: card.querySelector('.t-title'),
+          badge: card.querySelector('.t-badge'),
+          pct: card.querySelector('.t-pct'),
+          fill: card.querySelector('.t-progress-fill'),
+          dl: card.querySelector('.t-dl'),
+          peers: card.querySelector('.t-peers'),
+          sizeWrap: card.querySelector('.t-size-wrap'),
+          size: card.querySelector('.t-size'),
+          etaWrap: card.querySelector('.t-eta-wrap'),
+          eta: card.querySelector('.t-eta'),
+          actions: card.querySelector('.t-actions'),
+          watch: card.querySelector('.t-watch'),
+          pause: card.querySelector('.t-pause'),
+          save: card.querySelector('.t-save'),
+          saveProgress: card.querySelector('.t-save-progress'),
+          savePhase: card.querySelector('.t-save-phase'),
+          savePct: card.querySelector('.t-save-pct'),
+          saveBar: card.querySelector('.t-save-bar'),
+          saveFill: card.querySelector('.t-save-fill'),
+          del: card.querySelector('.card-delete'),
+        };
+        const entry = { card, els, t: null, saving: false };
 
-        card.querySelector('.t-watch').addEventListener('click', () => {
-          if (canWatch) playTorrent(t);
+        // Listeners are attached once and read the latest snapshot off `entry`.
+        els.watch.addEventListener('click', () => {
+          const t = entry.t;
+          if (t && (t.progress || 0) > 0.02 && t.mainVideo) playTorrent(t);
         });
-        const pauseBtn = card.querySelector('.t-pause');
-        if (pauseBtn) {
-          pauseBtn.addEventListener('click', () => togglePauseTorrent(t.infoHash, isPaused, pauseBtn));
+        els.pause.addEventListener('click', () => {
+          if (entry.t) togglePauseTorrent(entry.t.infoHash, Boolean(entry.t.paused), els.pause);
+        });
+        els.save.addEventListener('click', () => {
+          if (entry.t) saveTorrentToLibrary(entry);
+        });
+        els.del.addEventListener('click', () => {
+          if (!entry.saving) removeTorrent(infoHash);
+        });
+        return entry;
+      };
+
+      const updateTorrentCard = (entry, t) => {
+        entry.t = t;
+        const els = entry.els;
+        const pct = Math.round((t.progress || 0) * 100);
+        const isComplete = (t.progress || 0) >= 1;
+        const canWatch = (t.progress || 0) > 0.02 && Boolean(t.mainVideo);
+        const isPaused = Boolean(t.paused);
+
+        if (els.title.textContent !== (t.name || t.infoHash)) {
+          els.title.textContent = t.name || t.infoHash;
         }
-        const saveBtn = card.querySelector('.t-save');
-        if (saveBtn) {
-          saveBtn.addEventListener('click', () => saveTorrentToLibrary(t, saveBtn));
+        els.badge.dataset.status = t.status;
+        els.badge.textContent = TORRENT_STATUS_TEXT[t.status] || t.status;
+        els.pct.textContent = `${pct}%`;
+        els.fill.style.width = `${pct}%`;
+        els.dl.textContent = formatSpeed(t.downloadSpeed);
+        els.peers.textContent = t.numPeers || 0;
+
+        if (t.mainVideo) {
+          els.size.textContent = formatSize(t.mainVideo.length);
+          els.sizeWrap.hidden = false;
+        } else {
+          els.sizeWrap.hidden = true;
         }
-        card.querySelector('.card-delete').addEventListener('click', () => removeTorrent(t.infoHash));
-        return card;
+        // ETA only reads sensibly while downloading; paused/stalled/complete
+        // would just show a placeholder, so hide the stat entirely.
+        const showEta = !isComplete && !isPaused && t.etaSeconds != null;
+        if (showEta) {
+          els.eta.textContent = formatEta(t.etaSeconds);
+          els.etaWrap.hidden = false;
+        } else {
+          els.etaWrap.hidden = true;
+        }
+
+        // Saving owns the bottom of the card. `entry.saving` latches the
+        // instant the user clicks (before the poll catches up); `t.saving`
+        // covers a save begun before this page loaded.
+        const saving = entry.saving || Boolean(t.saving);
+        els.del.disabled = saving;
+        if (saving) {
+          els.actions.hidden = true;
+          els.saveProgress.hidden = false;
+          const indeterminate = t.savePhase === 'subtitles' || typeof t.saveProgress !== 'number';
+          if (indeterminate) {
+            els.savePhase.textContent = 'Finishing up';
+            els.savePct.textContent = '';
+            els.saveBar.classList.add('is-indeterminate');
+          } else {
+            const sp = Math.round((t.saveProgress || 0) * 100);
+            els.savePhase.textContent = 'Transcoding';
+            els.savePct.textContent = `${sp}%`;
+            els.saveBar.classList.remove('is-indeterminate');
+            els.saveFill.style.width = `${sp}%`;
+          }
+          return;
+        }
+
+        els.saveProgress.hidden = true;
+        els.actions.hidden = false;
+        els.watch.disabled = !canWatch;
+        els.watch.textContent = canWatch ? 'Watch' : 'Buffering…';
+        // Pause/Resume only matters while downloading; at 100% it's a no-op.
+        els.pause.hidden = isComplete;
+        els.pause.textContent = isPaused ? 'Resume' : 'Pause';
+        els.save.hidden = !(isComplete && t.mainVideo);
       };
 
       const togglePauseTorrent = async (infoHash, isPaused, btn) => {
@@ -4846,6 +4985,8 @@
           loadTorrents();
         } catch (err) {
           alert(`Failed to ${action}: ${err.message}`);
+        } finally {
+          // The card persists across polls now, so re-enable explicitly.
           btn.disabled = false;
         }
       };
@@ -4854,21 +4995,48 @@
         String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
       const loadTorrents = async () => {
+        let torrents;
         try {
           const res = await fetch(`${API}/torrents`);
-          const torrents = await res.json();
-          torrentGridEl.innerHTML = '';
-          if (!torrents.length) {
-            torrentEmpty.style.display = 'flex';
-            torrentGridEl.style.display = 'none';
-          } else {
-            torrentEmpty.style.display = 'none';
-            torrentGridEl.style.display = 'grid';
-            torrents.forEach((t) => torrentGridEl.appendChild(renderTorrentCard(t)));
-          }
+          torrents = await res.json();
         } catch {
+          torrentCards.clear();
+          torrentEmpty.style.display = 'none';
+          torrentGridEl.style.display = 'grid';
           torrentGridEl.innerHTML = `<div style="grid-column:1/-1;color:var(--text-dim);font-size:13px;letter-spacing:0.2em;text-transform:uppercase;padding:40px 0;text-align:center;">Cannot reach server at ${API}.</div>`;
+          return;
         }
+
+        if (!torrents.length) {
+          torrentCards.clear();
+          torrentGridEl.innerHTML = '';
+          torrentEmpty.style.display = 'flex';
+          torrentGridEl.style.display = 'none';
+          return;
+        }
+
+        torrentEmpty.style.display = 'none';
+        torrentGridEl.style.display = 'grid';
+
+        const seen = new Set();
+        torrents.forEach((t) => {
+          seen.add(t.infoHash);
+          let entry = torrentCards.get(t.infoHash);
+          if (!entry) {
+            entry = createTorrentCard(t.infoHash);
+            torrentCards.set(t.infoHash, entry);
+            torrentGridEl.appendChild(entry.card);
+          }
+          updateTorrentCard(entry, t);
+        });
+
+        // Drop cards whose torrent is gone (removed, or saved to library).
+        torrentCards.forEach((entry, hash) => {
+          if (!seen.has(hash)) {
+            entry.card.remove();
+            torrentCards.delete(hash);
+          }
+        });
       };
 
       const addTorrent = async () => {
@@ -4908,47 +5076,35 @@
         }
       };
 
-      const saveTorrentToLibrary = async (t, btn) => {
+      const saveTorrentToLibrary = async (entry) => {
+        const t = entry.t;
+        if (!t) return;
         const label = t.mainVideo ? t.mainVideo.name : t.name;
         if (!confirm(`Save "${label}" to your library? The torrent will be removed.`)) return;
 
-        // The server's save-to-library call now includes an ffmpeg pass
-        // (audio re-encode + faststart). It blocks until done — typically
-        // 1-3 min for a 1-2 GB file. We show a live elapsed counter so the
-        // user doesn't think the button has hung.
-        btn.disabled = true;
-        btn.classList.add('is-working');
-        const startedAt = Date.now();
-        const fmtMMSS = (totalSec) => {
-          const m = String(Math.floor(totalSec / 60)).padStart(2, '0');
-          const s = String(totalSec % 60).padStart(2, '0');
-          return `${m}:${s}`;
-        };
-        const render = () => {
-          const elapsed = Math.floor((Date.now() - startedAt) / 1000);
-          btn.innerHTML = `<span class="spinner"></span>Transcoding ${fmtMMSS(elapsed)}`;
-        };
-        render();
-        const timer = setInterval(render, 1000);
+        // The server's save-to-library call runs an ffmpeg pass (audio
+        // re-encode + faststart) and blocks until done — typically 1-3 min for
+        // a 1-2 GB file. Latch `saving` so the in-card progress bar shows at
+        // once and survives every poll; the determinate bar is then driven by
+        // saveProgress from /torrents until the torrent is removed server-side.
+        entry.saving = true;
+        updateTorrentCard(entry, t);
+        showStatusToast(`Adding "${label}" to your library…`, { state: 'running' });
 
         try {
           const res = await fetch(`${API}/torrent/${t.infoHash}/save-to-library`, {
             method: 'POST',
           });
-          if (!res.ok) {
-            const body = await res.json().catch(() => ({}));
-            throw new Error(body.error || `HTTP ${res.status}`);
-          }
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+          showStatusToast(`Added "${body.name || label}" to your library`, { state: 'done', autoHideMs: 4000 });
+          // The torrent is now gone server-side; loadTorrents removes the card.
           await Promise.all([loadTorrents(), loadVideos()]);
-          // On success the torrent card is re-rendered or removed entirely,
-          // so we don't need to reset btn state.
         } catch (err) {
+          entry.saving = false;
+          updateTorrentCard(entry, entry.t || t);
+          hideStatusToast();
           alert('Failed to save: ' + err.message);
-          btn.disabled = false;
-          btn.classList.remove('is-working');
-          btn.textContent = 'Save to Library';
-        } finally {
-          clearInterval(timer);
         }
       };
 
