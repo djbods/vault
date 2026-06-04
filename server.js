@@ -72,9 +72,11 @@ const sanitizeLang = (lang) => {
   return m ? m[0] : 'en';
 };
 
-// Strip release-group / quality / codec cruft so TMDB has a clean title to search.
+// Strip release-group / quality / codec cruft to recover a clean title.
 // "Project Hail Mary 2026 1080p WEB-DL HEVC ..." -> "Project Hail Mary 2026"
-const cleanQueryForTmdb = (filename) => {
+// Used both as the TMDB search query and as the on-disk library basename so
+// imported files don't inherit the torrent uploader's noisy name.
+const cleanReleaseName = (filename) => {
   let s = filename.replace(/\.[^.]+$/, '').replace(/[._]+/g, ' ');
   const year = s.match(/^(.*?)\s+(?:\(|\[)?(\d{4})(?:\)|\])?(?:\s|$)/);
   if (year) return `${year[1].trim()} ${year[2]}`.trim();
@@ -296,7 +298,11 @@ app.post('/upload', upload.single('file'), async (req, res) => {
   }
   const stagedPath = req.file.path;
   try {
-    const targetBase = sanitize(baseNameNoExt(req.file.filename)) || `upload-${Date.now()}`;
+    // Trim release cruft off the uploaded filename so the library name is
+    // clean by default; fall back to the raw name, then a timestamp.
+    const targetBase = sanitize(cleanReleaseName(req.file.originalname))
+      || sanitize(baseNameNoExt(req.file.filename))
+      || `upload-${Date.now()}`;
     const outPath = await prepareForLibrary(stagedPath, VIDEOS_DIR, targetBase);
     // Pull embedded subtitle tracks out of the source container before we
     // delete the staged file. prepareForLibrary only copies video+audio,
@@ -1279,7 +1285,7 @@ app.get('/tmdb/status', (req, res) => {
 app.get('/tmdb/suggest-query', (req, res) => {
   const filename = (req.query.filename || '').trim();
   if (!filename) return res.status(400).json({ error: 'filename required' });
-  res.json({ query: cleanQueryForTmdb(filename) });
+  res.json({ query: cleanReleaseName(filename) });
 });
 
 app.get('/tmdb/search', async (req, res) => {
@@ -1541,7 +1547,7 @@ const downloadTmdbPosterToLibrary = async (posterPath, videoBaseName) => {
 };
 
 const runSearchForBackfill = async (filename) => {
-  const raw = cleanQueryForTmdb(filename);
+  const raw = cleanReleaseName(filename);
   if (!raw) return { title: '', year: null, results: [] };
   let title = raw;
   let year = null;
@@ -1866,7 +1872,12 @@ app.post('/torrent/:infoHash/save-to-library', async (req, res) => {
 
     // Build a safe library basename — output is always .mp4 regardless of
     // input container; prepareForLibrary adds the extension.
-    const cleanedBase = sanitize(baseNameNoExt(videoFile.name)) || `torrent-${req.params.infoHash}`;
+    // Trim release cruft (1080p, BluRay, x265-GROUP, …) off the torrent's
+    // filename so the library name is clean by default. The user still gets
+    // the edit modal afterwards to fine-tune it.
+    const cleanedBase = sanitize(cleanReleaseName(videoFile.name))
+      || sanitize(baseNameNoExt(videoFile.name))
+      || `torrent-${req.params.infoHash}`;
     if (cleanedBase.includes('/') || cleanedBase.includes('..')) {
       state.savingToLibrary = false;
       return res.status(400).json({ error: 'Invalid filename' });
