@@ -93,6 +93,9 @@ All optional. See `.env.example` for the full annotated version.
   placeholders that can't stream).
 - `TORRENT_DIR` — where in-progress torrents download to. **Keep this
   local.** Every piece write triggers an iCloud upload otherwise.
+- `HLS_CACHE_DIR` — where lazily-built HLS artifacts (fMP4 remux + playlists)
+  are cached for AirPlay subtitle support. Defaults to `./hls-cache`. **Keep
+  this local** for the same reason as `TORRENT_DIR`.
 - `TMDB_API_KEY` — enables `/tmdb/*` routes (poster search + fetch). Without
   it those routes return 503 and the UI silently hides TMDB buttons.
 
@@ -115,6 +118,11 @@ POST   /upload-subtitles                 → upload SRT/VTT, write as <base>.<la
 GET    /subtitles/:filename              → list subtitles for a video
 DELETE /subtitles/:videoName/:subName    → remove one subtitle sidecar
 GET    /stream-subtitle/:filename        → serve VTT (auto-converts SRT)
+GET    /hls/:filename/master.m3u8        → HLS master (variant + WebVTT subtitle group)
+GET    /hls/:filename/video.m3u8         → fMP4 variant playlist (single-file byterange)
+GET    /hls/:filename/video.m4s          → byte-range stream of the fMP4 remux
+GET    /hls/:filename/subs_<lang>.m3u8   → per-language WebVTT rendition playlist
+GET    /hls/:filename/<lang>.vtt         → VTT with X-TIMESTAMP-MAP injected for HLS
 GET    /poster/:filename                 → serve poster image
 POST   /upload-poster                    → upload poster sidecar
 DELETE /poster/:videoName                → remove poster sidecar
@@ -152,6 +160,29 @@ text-codec stream (`subrip`/`srt`/`ass`/`ssa`/`mov_text`/`webvtt`/`text`) is
 extracted to `<base>.<lang>.vtt`. Bitmap codecs (PGS / DVB / DVD / xsub)
 need OCR — they're logged and skipped. Existing sidecar files are
 preserved (manual uploads + torrent siblings win over embedded streams).
+
+### HLS for AirPlay subtitles (`ensureHls`)
+
+Native AirPlay hands the receiver the media URL and the TV plays it itself, so
+sidecar `<track>` WebVTT cues — rendered locally by Safari — never reach the TV.
+Reliable, toggleable captions over AirPlay require **HLS with a WebVTT subtitle
+group** in the manifest. `ensureHls(filename)` lazily builds, per library file,
+into `HLS_CACHE_DIR/<base>/` (local, never iCloud):
+
+- `video.m4s` + `video.m3u8` — a lossless single-file fMP4 remux
+  (`ffmpeg -c copy`, `-tag:v hvc1` only when HEVC, `-hls_flags single_file`)
+  using `EXT-X-MAP` + `EXT-X-BYTERANGE`. One extra file, not hundreds of
+  segments. Keyed by source mtime+size (`.source` stamp); rebuilt only when the
+  source changes. An in-flight `Map` guard prevents double ffmpeg spawns.
+- `master.m3u8` + `subs_<lang>.m3u8` — hand-written each request from the live
+  sidecar set, so subtitles added/removed after import are reflected. The VTT is
+  served with `X-TIMESTAMP-MAP=MPEGTS:0,LOCAL:00:00:00.000` injected.
+
+The frontend uses HLS **only in Safari** (feature-detected via
+`canPlayType('application/vnd.apple.mpegurl')`) — it plays HLS natively and is
+the AirPlay client. Other browsers keep the progressive `/stream` path. On the
+HLS path the player builds its subtitle menu from the in-band `textTracks`
+(populated asynchronously) rather than appending `<track>` elements.
 
 ### Torrent flow
 
