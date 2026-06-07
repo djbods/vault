@@ -591,6 +591,21 @@
           0 0 40px -10px rgba(212, 160, 74, 0.25);
       }
 
+      /* Hover-intent delay — defer the whole hover treatment (the bloom, its
+         shadow, the play button + action buttons, and the watched un-dim) by a
+         beat so sweeping the cursor across the grid doesn't balloon every card
+         it passes over. The delay sits on the :hover state only, so leaving a
+         card still shrinks it back instantly. Scoped to grid slots — shelf
+         cards don't bloom, so they keep their immediate hover feedback. */
+      .card-slot:not(.card-slot--shelf) .card:hover,
+      .card-slot:not(.card-slot--shelf) .card:hover .card-play,
+      .card-slot:not(.card-slot--shelf) .card:hover .card-delete,
+      .card-slot:not(.card-slot--shelf) .card:hover .card-edit,
+      .card-slot:not(.card-slot--shelf) .card.card--watched:hover .card-media .poster-img,
+      .card-slot:not(.card-slot--shelf) .card.card--watched:hover .card-media > video {
+        transition-delay: 0.28s;
+      }
+
       .card-media {
         position: absolute;
         inset: 0;
@@ -5025,11 +5040,10 @@
         libraryControlsEl.hidden = !libraryCache.length;
 
         gridEl.innerHTML = '';
+        // The Continue Watching shelf is left untouched by search/sort/filter —
+        // it always reflects where you left off, and keeping it fixed avoids a
+        // jarring layout jump the moment you start typing in the search box.
         renderContinueShelf();
-        // While searching, the Continue Watching shelf is redundant with the
-        // grid (matching in-progress films appear there too) — collapse it so
-        // results lead.
-        if (searching) continueShelfEl.hidden = true;
         if (!libraryCache.length) {
           libraryEmpty.style.display = 'flex';
           gridEl.style.display = 'none';
