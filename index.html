@@ -327,6 +327,109 @@
         background: rgba(212, 160, 74, 0.2);
       }
 
+      /* Library controls — search field, unwatched toggle, sort dropdown.
+         Sits between the Continue Watching shelf and the genre pills. */
+      .library-controls {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 18px;
+        flex-wrap: wrap;
+      }
+      .library-controls[hidden] { display: none; }
+      .lib-search {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex: 1 1 280px;
+        min-width: 200px;
+        max-width: 460px;
+        padding: 10px 16px;
+        background: var(--surface);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 999px;
+        transition: border-color 0.25s ease, background 0.25s ease;
+      }
+      .lib-search:focus-within {
+        border-color: var(--border-strong);
+        background: rgba(212, 160, 74, 0.04);
+      }
+      .lib-search-icon {
+        width: 16px;
+        height: 16px;
+        color: var(--text-faint);
+        flex: 0 0 auto;
+      }
+      .lib-search input {
+        flex: 1;
+        min-width: 0;
+        border: none;
+        background: none;
+        outline: none;
+        color: var(--text);
+        font-family: 'DM Sans', sans-serif;
+        font-size: 13px;
+        letter-spacing: 0.02em;
+      }
+      .lib-search input::placeholder { color: var(--text-faint); }
+      .lib-controls-right {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: auto;
+      }
+      .lib-toggle {
+        font-family: 'DM Sans', sans-serif;
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        padding: 9px 16px;
+        background: var(--surface);
+        color: var(--text-dim);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 999px;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: all 0.25s ease;
+      }
+      .lib-toggle:hover {
+        color: var(--text);
+        border-color: rgba(255, 255, 255, 0.15);
+      }
+      .lib-toggle.active {
+        color: var(--gold);
+        background: rgba(212, 160, 74, 0.14);
+        border-color: var(--gold);
+      }
+      .lib-sort {
+        font-family: 'DM Sans', sans-serif;
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        padding: 9px 34px 9px 16px;
+        color: var(--text-dim);
+        background-color: var(--surface);
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239a948a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 13px center;
+        background-size: 11px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 999px;
+        cursor: pointer;
+        outline: none;
+        -webkit-appearance: none;
+        appearance: none;
+        transition: all 0.25s ease;
+      }
+      .lib-sort:hover {
+        color: var(--text);
+        border-color: rgba(255, 255, 255, 0.15);
+      }
+      .lib-sort:focus { border-color: var(--border-strong); }
+      .lib-sort option { background: var(--bg-elevated); color: var(--text); }
+
       .grid-empty-msg {
         grid-column: 1 / -1;
         color: var(--text-dim);
@@ -2441,6 +2544,9 @@
           margin-right: -16px;
           padding: 0 16px 6px;
         }
+        .lib-search { flex: 1 1 100%; max-width: none; }
+        .lib-controls-right { margin-left: 0; width: 100%; }
+        .lib-sort { flex: 1; }
         .grid {
           grid-template-columns: repeat(2, 1fr);
           gap: 16px;
@@ -2524,6 +2630,23 @@
             </header>
             <div class="shelf-row" id="continueShelfRow"></div>
           </section>
+          <div class="library-controls" id="libraryControls" hidden>
+            <label class="lib-search">
+              <svg class="lib-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>
+              </svg>
+              <input type="search" id="librarySearch" placeholder="Search title, cast, director…" spellcheck="false" autocomplete="off"/>
+            </label>
+            <div class="lib-controls-right">
+              <button type="button" class="lib-toggle" id="unwatchedToggle" aria-pressed="false">Unwatched</button>
+              <select class="lib-sort" id="librarySort" aria-label="Sort films">
+                <option value="added">Recently added</option>
+                <option value="title">A–Z</option>
+                <option value="year">Year</option>
+                <option value="runtime">Shortest</option>
+              </select>
+            </div>
+          </div>
           <div class="genre-bar" id="genreBar"></div>
           <div class="grid" id="grid"></div>
           <div class="empty" id="libraryEmpty" style="display: none">
@@ -4599,6 +4722,16 @@
         return r === 0 ? `${h}h left` : `${h}h ${r}m left`;
       };
 
+      // TMDB runtime is whole minutes → "1h 52m" / "47m". Empty when unknown.
+      const formatRuntime = (mins) => {
+        const m = Number(mins);
+        if (!Number.isFinite(m) || m <= 0) return '';
+        const h = Math.floor(m / 60);
+        const r = m % 60;
+        if (h <= 0) return `${r}m`;
+        return r === 0 ? `${h}h` : `${h}h ${r}m`;
+      };
+
       const renderCard = (video, opts = {}) => {
         const { inShelf = false } = opts;
         const slot = document.createElement('div');
@@ -4648,7 +4781,7 @@
               <span class="card-meta-size">${
                 progress && progress.remaining != null
                   ? formatRemaining(progress.remaining)
-                  : (progress ? 'Continue' : formatSize(video.size))
+                  : (progress ? 'Continue' : (formatRuntime(video.runtime) || formatSize(video.size)))
               }</span>
             </div>
           </div>
@@ -4721,6 +4854,90 @@
         } catch {}
       };
 
+      // ---- Search / sort / unwatched-only controls
+      // Search filters the grid in real time; sort + unwatched-only persist to
+      // localStorage so the user's preferences stick across reloads. All three
+      // combine with the genre pills inside renderLibrary().
+      const SORT_STORAGE_KEY = 'vault.librarySort';
+      const UNWATCHED_STORAGE_KEY = 'vault.unwatchedOnly';
+      const SORT_OPTIONS = ['added', 'title', 'year', 'runtime'];
+      const librarySearchEl = document.getElementById('librarySearch');
+      const librarySortEl = document.getElementById('librarySort');
+      const unwatchedToggleEl = document.getElementById('unwatchedToggle');
+      const libraryControlsEl = document.getElementById('libraryControls');
+
+      let librarySearchQuery = '';
+      let librarySort = (() => {
+        try {
+          const v = localStorage.getItem(SORT_STORAGE_KEY);
+          return SORT_OPTIONS.includes(v) ? v : 'added';
+        } catch { return 'added'; }
+      })();
+      let unwatchedOnly = (() => {
+        try { return localStorage.getItem(UNWATCHED_STORAGE_KEY) === '1'; } catch { return false; }
+      })();
+
+      // Reflect persisted state into the controls on boot.
+      librarySortEl.value = librarySort;
+      unwatchedToggleEl.classList.toggle('active', unwatchedOnly);
+      unwatchedToggleEl.setAttribute('aria-pressed', String(unwatchedOnly));
+
+      // Searchable text for a video: cleaned title + genres + cast + director
+      // + year, lowercased. Lets a search hit any of them.
+      const searchHaystack = (v) => [
+        cleanName(v.name),
+        ...(v.genres || []),
+        ...(v.cast || []),
+        v.director || '',
+        v.year ? String(v.year) : '',
+      ].join(' ').toLowerCase();
+
+      const sortVideos = (list) => {
+        const arr = [...list];
+        if (librarySort === 'title') {
+          arr.sort((a, b) =>
+            cleanName(a.name).localeCompare(cleanName(b.name), undefined, { sensitivity: 'base' }));
+        } else if (librarySort === 'year') {
+          // Newest year first; unknown years sink to the bottom.
+          arr.sort((a, b) => (Number(b.year) || -Infinity) - (Number(a.year) || -Infinity));
+        } else if (librarySort === 'runtime') {
+          // Shortest first; unknown runtimes sink to the bottom.
+          arr.sort((a, b) => (Number(a.runtime) || Infinity) - (Number(b.runtime) || Infinity));
+        } else {
+          // 'added' — most recently modified first (matches the server default).
+          arr.sort((a, b) => String(b.modified || '').localeCompare(String(a.modified || '')));
+        }
+        return arr;
+      };
+
+      let librarySearchDebounce = null;
+      librarySearchEl.addEventListener('input', () => {
+        clearTimeout(librarySearchDebounce);
+        librarySearchDebounce = setTimeout(() => {
+          librarySearchQuery = librarySearchEl.value.trim().toLowerCase();
+          renderLibrary();
+        }, 120);
+      });
+      // The native search-field clear (×) and Escape fire a 'search' event —
+      // respond immediately rather than waiting on the input debounce.
+      librarySearchEl.addEventListener('search', () => {
+        clearTimeout(librarySearchDebounce);
+        librarySearchQuery = librarySearchEl.value.trim().toLowerCase();
+        renderLibrary();
+      });
+      librarySortEl.addEventListener('change', () => {
+        librarySort = SORT_OPTIONS.includes(librarySortEl.value) ? librarySortEl.value : 'added';
+        try { localStorage.setItem(SORT_STORAGE_KEY, librarySort); } catch {}
+        renderLibrary();
+      });
+      unwatchedToggleEl.addEventListener('click', () => {
+        unwatchedOnly = !unwatchedOnly;
+        unwatchedToggleEl.classList.toggle('active', unwatchedOnly);
+        unwatchedToggleEl.setAttribute('aria-pressed', String(unwatchedOnly));
+        try { localStorage.setItem(UNWATCHED_STORAGE_KEY, unwatchedOnly ? '1' : '0'); } catch {}
+        renderLibrary();
+      });
+
       const renderGenrePills = (videos) => {
         // Build the union of genres present in the current library, sorted
         // alphabetically so the pill order is stable. Filters that point
@@ -4791,13 +5008,28 @@
       };
 
       const renderLibrary = () => {
-        const matches = selectedGenres.size === 0
-          ? libraryCache
-          : libraryCache.filter((v) =>
-              (v.genres || []).some((g) => selectedGenres.has(g))
-            );
+        const searching = librarySearchQuery.length > 0;
+        let matches = libraryCache;
+        if (selectedGenres.size > 0) {
+          matches = matches.filter((v) => (v.genres || []).some((g) => selectedGenres.has(g)));
+        }
+        if (unwatchedOnly) {
+          matches = matches.filter((v) => !v.watched);
+        }
+        if (searching) {
+          matches = matches.filter((v) => searchHaystack(v).includes(librarySearchQuery));
+        }
+        matches = sortVideos(matches);
+
+        // Controls are useless on an empty library — hide them with the grid.
+        libraryControlsEl.hidden = !libraryCache.length;
+
         gridEl.innerHTML = '';
         renderContinueShelf();
+        // While searching, the Continue Watching shelf is redundant with the
+        // grid (matching in-progress films appear there too) — collapse it so
+        // results lead.
+        if (searching) continueShelfEl.hidden = true;
         if (!libraryCache.length) {
           libraryEmpty.style.display = 'flex';
           gridEl.style.display = 'none';
@@ -4806,7 +5038,10 @@
         libraryEmpty.style.display = 'none';
         gridEl.style.display = 'grid';
         if (!matches.length) {
-          gridEl.innerHTML = `<div class="grid-empty-msg">No films in this selection.</div>`;
+          const msg = searching
+            ? `No films match “${escapeHtml(librarySearchEl.value.trim())}”.`
+            : 'No films in this selection.';
+          gridEl.innerHTML = `<div class="grid-empty-msg">${msg}</div>`;
           return;
         }
         matches.forEach((v) => gridEl.appendChild(renderCard(v)));
